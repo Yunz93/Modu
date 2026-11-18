@@ -19,7 +19,7 @@
 
 ## 下载
 
-从 [墨牍 0.1.1](https://github.com/Yunz93/Modu/releases/tag/v0.1.1) 下载 Apple Silicon DMG，将「墨牍.app」拖入 Applications。当前安装包使用 ad-hoc 签名，未做 Apple 公证。
+从 [最新正式版](https://github.com/Yunz93/Modu/releases/latest) 下载 Apple Silicon DMG，将「墨牍.app」拖入 Applications。当前安装包使用 ad-hoc 签名，未做 Apple 公证。
 
 拾读 0.1.0 需要手动安装一次墨牍。首次启动墨牍前先退出拾读，墨牍会自动复制旧阅读库。之后可在阅读库菜单中检查更新。
 
