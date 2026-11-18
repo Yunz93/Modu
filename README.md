@@ -19,7 +19,7 @@
 
 ## 下载
 
-0.1.1 当前为发布草稿，等待真实升级验收，尚未开放稳定更新入口。发布后可访问 [GitHub Releases](https://github.com/Yunz93/Modu/releases) 下载 Apple Silicon DMG，将「墨牍.app」拖入 Applications。当前 macOS 包使用本地 ad-hoc 签名，未做 Apple 公证。0.1.0 拾读需要手动安装一次包含更新器的墨牍版本，之后可在阅读库菜单中检查更新。
+0.1.1 当前为发布草稿，等待真实升级验收，尚未开放稳定更新入口。发布后可访问 [GitHub Releases](https://github.com/Yunz93/Modu/releases) 下载 Apple Silicon DMG，将「墨牍.app」拖入 Applications。当前 macOS 包使用本地 ad-hoc 签名，未做 Apple 公证。0.1.0 拾读需要手动安装一次包含更新器的墨牍版本，首次启动墨牍前先退出拾读；之后可在阅读库菜单中检查更新。
 
 ## 开发
 
