@@ -16,7 +16,8 @@ export const native = {
   retry: () => invoke<Loaded>("retry_library"),
   recover: (library: Library) => invoke<Loaded>("recover_library", { library }),
   fonts: () => invoke<string[]>("list_system_fonts"),
-  setAppearance: (theme: string) => invoke("set_app_appearance", { theme }),
+  setAppearance: (theme: string, followSystem: boolean) =>
+    invoke("set_app_appearance", { theme, followSystem }),
   recordFailure: (id: string, message: string) =>
     invoke<Source>("record_feed_failure", { id, message }),
   restoreSource: (id: string) => invoke<Loaded>("restore_subscription", { id }),
@@ -112,12 +113,12 @@ export function interceptExternalLinks(event: MouseEvent) {
 
 export async function listenNativeMenus(
   onUpdates: () => void,
-  onAppearance: () => void,
+  onSettings: () => void,
 ) {
   const { listen } = await import("@tauri-apps/api/event");
   const subscriptions = await Promise.allSettled([
     listen("modu://updates", onUpdates),
-    listen("modu://appearance", onAppearance),
+    listen("modu://settings", onSettings),
   ]);
   const cleanup = () =>
     subscriptions.forEach((item) => {

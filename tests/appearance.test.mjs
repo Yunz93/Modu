@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   appearanceVariables,
   contrastRatio,
+  effectiveAppearance,
   fontFamilyCss,
   normalizePreferences,
   resolveAccent,
@@ -18,6 +19,12 @@ test("legacy appearance settings gain optional fields without resetting existing
   assert.deepEqual(result, {
     ...previous,
     accentColor: "",
+    followSystemTheme: false,
+    uiFontSize: undefined,
+    narrowReading: false,
+    markReadOnOpen: true,
+    codeFontFamily: "",
+    singleKeyShortcuts: true,
     uiFontFamily: "",
     readingFontFamily: "",
   });
@@ -79,4 +86,47 @@ test("custom font names are quoted and keep system fallback rather than injectin
       '"A \\"quoted\\" name",',
     ),
   );
+});
+
+test("system appearance resolves its palette without overwriting a manual choice", () => {
+  const values = normalizePreferences({
+    ...preferences,
+    followSystemTheme: true,
+  });
+  assert.equal(effectiveAppearance(values, false), "paper");
+  assert.equal(effectiveAppearance(values, true), "night");
+  assert.equal(
+    appearanceVariables(values, effectiveAppearance(values, true))["--accent"],
+    "#d49b7e",
+  );
+  assert.equal(values.theme, "paper");
+  assert.equal(
+    effectiveAppearance({ ...values, followSystemTheme: false }, true),
+    "paper",
+  );
+});
+
+test("reading and interface settings retain their own values and reject invalid presentation input", () => {
+  const values = normalizePreferences({
+    ...preferences,
+    uiFontSize: 20,
+    narrowReading: true,
+    codeFontFamily: " Menlo ",
+    markReadOnOpen: false,
+    singleKeyShortcuts: false,
+  });
+  const css = appearanceVariables(values);
+  assert.equal(css["--ui-size-offset"], "4px");
+  assert.equal(css["--reading-width"], "740px");
+  assert.match(css["--code-font"], /^"Menlo",/);
+  assert.equal(values.fontSize, preferences.fontSize);
+  assert.equal(values.markReadOnOpen, false);
+  assert.equal(values.singleKeyShortcuts, false);
+  const bad = appearanceVariables({
+    ...preferences,
+    uiFontSize: 200,
+    codeFontFamily: "bad\nname",
+  });
+  assert.equal(bad["--ui-size-offset"], "0px");
+  assert.match(bad["--code-font"], /^"SFMono-Regular",/);
 });

@@ -6,16 +6,12 @@ import {
   useState,
 } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
-import * as Popover from "@radix-ui/react-popover";
 import {
   ArchiveIcon,
   ArrowClockwiseIcon,
   BookmarkSimpleIcon,
   CircleIcon,
-  DotsThreeIcon,
-  DownloadSimpleIcon,
-  FileArrowUpIcon,
-  KeyboardIcon,
+  GearSixIcon,
   ListBulletsIcon,
   MagnifyingGlassIcon,
   PlusIcon,
@@ -33,9 +29,11 @@ import {
   mergeImport,
   storageKey,
   type Library,
+  type Preferences,
   type View,
 } from "./model";
-import { UpdateCenter } from "./UpdateCenter";
+import { useUpdateCenter } from "./UpdateCenter";
+import { SettingsDialog, type SettingsSection } from "./SettingsDialog";
 import { Reader } from "./Reader";
 import { StartupScreen } from "./StartupScreen";
 import { queueUpdates, replaceContent } from "./feed-updates";
@@ -51,7 +49,11 @@ import {
   type Loaded,
   type Changes,
 } from "./desktop";
-import { applyAppearance, normalizePreferences } from "./appearance";
+import {
+  applyAppearance,
+  effectiveAppearance,
+  normalizePreferences,
+} from "./appearance";
 
 function loadLibrary(): { library: Library; error: string } {
   try {
@@ -121,14 +123,37 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
   );
   const [library, setLibrary] = useState(initial.library);
   const [storageError, setStorageError] = useState(initial.error);
-  const [appearanceRequest, setAppearanceRequest] = useState(0);
+  const [settingsSection, setSettingsSection] =
+    useState<SettingsSection | null>(null);
+  const settingsOrigin = useRef<HTMLElement | null>(null);
+  const navTrigger = useRef<HTMLButtonElement>(null);
+  const [systemDark, setSystemDark] = useState(
+    () => matchMedia("(prefers-color-scheme: dark)").matches,
+  );
+  const effectiveTheme = effectiveAppearance(library.preferences, systemDark);
+  const patchPreferences = (patch: Partial<Preferences>) => {
+    setLibrary((current) => ({
+      ...current,
+      preferences: { ...current.preferences, ...patch },
+    }));
+  };
+  const openSettings = useCallback(
+    (section: SettingsSection = "appearance", trigger?: HTMLElement) => {
+      const origin = trigger ?? document.activeElement;
+      if (!origin?.closest(".settings-dialog")) {
+        settingsOrigin.current = origin instanceof HTMLElement ? origin : null;
+      }
+      setNavOpen(false);
+      setSettingsSection(section);
+    },
+    [],
+  );
   const [closeError, setCloseError] = useState("");
   const restorePending = useRef(false);
   const [restoreBusy, setRestoreBusy] = useState(false);
   const [restoreError, setRestoreError] = useState("");
   const refreshPending = useRef(false);
   const refreshAbort = useRef<AbortController | null>(null);
-  const [updateOpen, setUpdateOpen] = useState(false);
   const [newVersion, setNewVersion] = useState("");
   const [installLocked, setInstallLocked] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -145,7 +170,6 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
   const [mobileReader, setMobileReader] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
-  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [notice, setNotice] = useState("");
   const [restore, setRestore] = useState<Library | null>(null);
   const search = useRef<HTMLInputElement>(null);
@@ -230,18 +254,30 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
       cleanup?.();
     };
   }, [nativeSave, flushReadingState]);
+  useEffect(() => {
+    const media = matchMedia("(prefers-color-scheme: dark)");
+    const update = () => setSystemDark(media.matches);
+    media.addEventListener("change", update);
+    update();
+    return () => media.removeEventListener("change", update);
+  }, []);
   useLayoutEffect(() => {
-    applyAppearance(library.preferences);
+    applyAppearance(library.preferences, effectiveTheme);
+  }, [library.preferences, effectiveTheme]);
+  const followSystemTheme = library.preferences.followSystemTheme === true;
+  useEffect(() => {
     if (desktop)
-      void native.setAppearance(library.preferences.theme).catch(() => {});
-  }, [library.preferences]);
+      void native
+        .setAppearance(effectiveTheme, followSystemTheme)
+        .catch(() => {});
+  }, [effectiveTheme, followSystemTheme]);
   useEffect(() => {
     if (!desktop) return;
     let stop: (() => void) | undefined;
     let disposed = false;
     void listenNativeMenus(
-      () => setUpdateOpen(true),
-      () => setAppearanceRequest((n) => n + 1),
+      () => openSettings("updates"),
+      () => openSettings(),
     )
       .then((unlisten) => {
         if (disposed) unlisten();
@@ -249,15 +285,13 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
       })
       .catch(() => {
         if (!disposed)
-          setStorageError(
-            "原生菜单暂未连接，请使用窗口内的阅读外观和更新入口。",
-          );
+          setStorageError("原生菜单暂未连接，请使用窗口内的设置入口。");
       });
     return () => {
       disposed = true;
       stop?.();
     };
-  }, []);
+  }, [openSettings]);
   useEffect(() => {
     if (searchOpen) search.current?.focus();
   }, [searchOpen]);
@@ -292,7 +326,10 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
     setLibrary((current) => ({
       ...current,
       selectedId: id,
-      read: [...new Set([...current.read, id])],
+      read:
+        current.preferences.markReadOnOpen === false
+          ? current.read
+          : [...new Set([...current.read, id])],
     }));
     setMobileReader(true);
   }, []);
@@ -343,12 +380,27 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
         )
       )
         return;
+      if (!desktop && (event.metaKey || event.ctrlKey) && event.key === ",") {
+        event.preventDefault();
+        openSettings();
+        return;
+      }
       if ((event.metaKey || event.ctrlKey) && event.key === "k") {
         event.preventDefault();
         setSearchOpen(true);
         return;
       }
       if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (event.key === "Escape") {
+        setFocus(false);
+        setNavOpen(false);
+        return;
+      }
+      if (event.key === "?") {
+        openSettings("shortcuts");
+        return;
+      }
+      if (library.preferences.singleKeyShortcuts === false) return;
       if (["j", "k"].includes(event.key)) {
         event.preventDefault();
         const index = articles.findIndex(
@@ -362,14 +414,18 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
       } else if (event.key === "f") {
         event.preventDefault();
         setFocus((value) => !value);
-      } else if (event.key === "Escape") {
-        setFocus(false);
-        setNavOpen(false);
-      } else if (event.key === "?") setShortcutsOpen(true);
+      }
     };
     window.addEventListener("keydown", handle);
     return () => window.removeEventListener("keydown", handle);
-  }, [articles, library.selectedId, openArticle, toggleSave]);
+  }, [
+    articles,
+    library.selectedId,
+    library.preferences.singleKeyShortcuts,
+    openArticle,
+    toggleSave,
+    openSettings,
+  ]);
 
   const mergeChanges = (changes: Changes[], consumePending = false) => {
     setLibrary((current) => {
@@ -588,6 +644,19 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
     return () =>
       events.forEach((name) => document.removeEventListener(name, block, true));
   }, [installLocked]);
+  const updatePanel = useUpdateCenter({
+    enabled: desktop,
+    onContinue: () => setSettingsSection(null),
+    preferences: library.preferences,
+    onPreferences: patchPreferences,
+    onAvailable: setNewVersion,
+    libraryBusy: refreshing || addOpen || !!restore,
+    onLock: (locked) => {
+      if (locked) operation.current++;
+      setInstallLocked(locked);
+    },
+    save: flushReadingState,
+  });
   const sidebar = (
     <aside className="sidebar" aria-label="阅读库导航">
       <header className="brand-header">
@@ -661,7 +730,7 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
         {desktop && newVersion && (
           <button
             className="update-available quiet-button"
-            onClick={() => setUpdateOpen(true)}
+            onClick={(event) => openSettings("updates", event.currentTarget)}
           >
             墨牍 {newVersion} 可用
           </button>
@@ -687,106 +756,14 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
                   : "刷新订阅"}
             </span>
           </button>
-          <Popover.Root>
-            <Popover.Trigger asChild>
-              <button
-                className="icon-button more-button"
-                aria-label="阅读库选项"
-              >
-                <DotsThreeIcon size={22} />
-              </button>
-            </Popover.Trigger>
-            <Popover.Portal>
-              <Popover.Content
-                className="library-menu"
-                side="top"
-                align="start"
-                sideOffset={10}
-                collisionPadding={12}
-              >
-                <p className="menu-caption">你的阅读库</p>
-                {desktop &&
-                  library.sources
-                    .filter((s) => s.archived)
-                    .map((source) => (
-                      <div className="archived-source" key={source.id}>
-                        <button
-                          onClick={async () => {
-                            try {
-                              await nativeSave?.flush();
-                              const result = await native.restoreSource(
-                                source.id,
-                              );
-                              setLibrary((current) =>
-                                replaceContent(current, result.library),
-                              );
-                              notify(`已恢复订阅：${source.name}`);
-                            } catch (reason) {
-                              notify(String(reason));
-                            }
-                          }}
-                        >
-                          恢复订阅：{source.name}
-                        </button>
-                      </div>
-                    ))}
-                {desktop && (
-                  <button onClick={() => setUpdateOpen(true)}>
-                    <ArrowClockwiseIcon size={18} />
-                    关于墨牍与更新
-                    {newVersion && <span className="update-badge">新版</span>}
-                  </button>
-                )}
-                <button
-                  onClick={() => {
-                    void exportLibrary(
-                      "墨牍-阅读库备份.json",
-                      JSON.stringify(
-                        { ...library, positions: positions.current },
-                        null,
-                        2,
-                      ),
-                      "json",
-                    );
-                  }}
-                >
-                  <DownloadSimpleIcon size={18} />
-                  导出完整备份
-                </button>
-                <button onClick={() => void chooseRestore()}>
-                  <FileArrowUpIcon size={18} />
-                  从备份恢复
-                </button>
-                <button
-                  onClick={() => {
-                    if (
-                      !library.sources.some((source) => source.kind !== "demo")
-                    ) {
-                      notify("示例来源不导出。添加自己的订阅后即可导出 OPML。");
-                      return;
-                    }
-                    void exportLibrary(
-                      "墨牍-订阅.opml",
-                      exportOpml(library.sources.filter((s) => !s.archived)),
-                      "opml",
-                    );
-                  }}
-                >
-                  <RssSimpleIcon size={18} />
-                  导出订阅 OPML
-                </button>
-                <button onClick={() => setShortcutsOpen(true)}>
-                  <KeyboardIcon size={18} />
-                  键盘快捷键<kbd>?</kbd>
-                </button>
-                <p className="menu-note">
-                  {desktop
-                    ? `阅读库保存在本机 SQLite。${loaded?.dataPath ?? ""}`
-                    : "阅读库保存在当前浏览器；可通过完整备份迁移至桌面版。"}
-                </p>
-              </Popover.Content>
-            </Popover.Portal>
-          </Popover.Root>
+          <button
+            className="icon-button more-button"
+            aria-label="设置"
+            title="设置 · ⌘,"
+            onClick={(event) => openSettings("appearance", event.currentTarget)}
+          >
+            <GearSixIcon size={22} />
+          </button>
         </div>
         {storageError && (
           <p className="storage-error" role="alert">
@@ -822,6 +799,7 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
           <div className="list-title-row">
             <button
               className="icon-button open-nav"
+              ref={navTrigger}
               aria-label="打开导航"
               onClick={() => setNavOpen(true)}
             >
@@ -1059,7 +1037,7 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
         </div>
       </section>
       <Reader
-        appearanceRequest={appearanceRequest}
+        effectiveTheme={effectiveTheme}
         article={article}
         source={source}
         saved={!!article && library.saved.includes(article.id)}
@@ -1071,9 +1049,7 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
         onRead={toggleRead}
         onFocus={() => setFocus((value) => !value)}
         onBack={() => setMobileReader(false)}
-        onPreferences={(preferences) =>
-          setLibrary((current) => ({ ...current, preferences }))
-        }
+        onPreferences={patchPreferences}
         onPosition={(id, position) => {
           positions.current[id] = position;
           clearTimeout(saveTimer.current);
@@ -1164,57 +1140,7 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
         }}
         onFile={importFile}
       />
-      <Dialog.Root open={shortcutsOpen} onOpenChange={setShortcutsOpen}>
-        <Dialog.Portal>
-          <Dialog.Overlay className="dialog-overlay" />
-          <Dialog.Content className="shortcuts-dialog">
-            <Dialog.Title>让阅读更顺手</Dialog.Title>
-            <Dialog.Description>
-              在正文或列表中使用，输入文字时不会触发。
-            </Dialog.Description>
-            <Dialog.Close
-              className="icon-button dialog-close"
-              aria-label="关闭快捷键"
-            >
-              <XIcon size={21} />
-            </Dialog.Close>
-            <dl className="shortcut-list">
-              <div>
-                <dt>下一篇 / 上一篇</dt>
-                <dd>
-                  <kbd>J</kbd>
-                  <kbd>K</kbd>
-                </dd>
-              </div>
-              <div>
-                <dt>收藏 / 取消收藏</dt>
-                <dd>
-                  <kbd>S</kbd>
-                </dd>
-              </div>
-              <div>
-                <dt>专注模式</dt>
-                <dd>
-                  <kbd>F</kbd>
-                </dd>
-              </div>
-              <div>
-                <dt>搜索文章</dt>
-                <dd>
-                  <kbd>⌘</kbd>
-                  <kbd>K</kbd>
-                </dd>
-              </div>
-              <div>
-                <dt>退出专注 / 关闭弹窗</dt>
-                <dd>
-                  <kbd>Esc</kbd>
-                </dd>
-              </div>
-            </dl>
-          </Dialog.Content>
-        </Dialog.Portal>
-      </Dialog.Root>
+
       <input
         type="file"
         ref={restoreInput}
@@ -1342,23 +1268,68 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
           );
         }}
       />
-      {desktop && (
-        <UpdateCenter
-          open={updateOpen}
-          onOpenChange={setUpdateOpen}
-          preferences={library.preferences}
-          onPreferences={(preferences) =>
-            setLibrary((current) => ({ ...current, preferences }))
+      <SettingsDialog
+        section={settingsSection}
+        onSectionChange={setSettingsSection}
+        restoreFocus={() => {
+          const origin = settingsOrigin.current;
+          if (origin?.isConnected && origin.getClientRects().length)
+            origin.focus();
+          else if (navTrigger.current?.getClientRects().length)
+            navTrigger.current.focus();
+        }}
+        locked={installLocked}
+        preferences={library.preferences}
+        effectiveTheme={effectiveTheme}
+        onPreferences={patchPreferences}
+        dataPath={loaded?.dataPath}
+        storageError={storageError}
+        notice={notice}
+        archivedSources={
+          desktop ? library.sources.filter((source) => source.archived) : []
+        }
+        onRestoreSource={async (id) => {
+          try {
+            await nativeSave?.flush();
+            const result = await native.restoreSource(id);
+            setLibrary((current) => replaceContent(current, result.library));
+            notify("已恢复订阅。");
+          } catch (reason) {
+            notify(String(reason));
           }
-          onAvailable={setNewVersion}
-          libraryBusy={refreshing || addOpen || !!restore}
-          onLock={(locked) => {
-            if (locked) operation.current++;
-            setInstallLocked(locked);
-          }}
-          save={flushReadingState}
-        />
-      )}
+        }}
+        onExportBackup={() =>
+          exportLibrary(
+            "墨牍-阅读库备份.json",
+            JSON.stringify(
+              { ...libraryRef.current, positions: positions.current },
+              null,
+              2,
+            ),
+            "json",
+          )
+        }
+        onRestoreBackup={() => void chooseRestore()}
+        onExportOpml={async () => {
+          const sources = libraryRef.current.sources.filter(
+            (source) => !source.archived && source.kind !== "demo",
+          );
+          if (!sources.length) {
+            notify("添加自己的订阅后即可导出 OPML。");
+            return;
+          }
+          await exportLibrary("墨牍-订阅.opml", exportOpml(sources), "opml");
+        }}
+        updatePanel={
+          desktop ? (
+            updatePanel
+          ) : (
+            <p className="settings-note">
+              当前为浏览器版。应用内更新适用于 macOS 桌面版。
+            </p>
+          )
+        }
+      />
       <div
         className={`toast ${notice ? "visible" : ""}`}
         role="status"

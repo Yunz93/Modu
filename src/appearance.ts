@@ -2,6 +2,7 @@ import type { Preferences } from "./model";
 
 export const uiFontFallback =
   '-apple-system, BlinkMacSystemFont, "PingFang SC", "Noto Sans SC", sans-serif';
+export const codeFontFallback = '"SFMono-Regular", Consolas, monospace';
 const serifFallback = 'Georgia, "Songti SC", "Noto Serif SC", serif';
 
 // Sampled from the user's Mozi screenshots; workspace.css confirms the roles.
@@ -33,6 +34,16 @@ export function isFontName(value: unknown): value is string {
 export function normalizePreferences(preferences: Preferences): Preferences {
   return {
     ...preferences,
+    followSystemTheme: preferences.followSystemTheme === true,
+    uiFontSize: [14, 16, 18, 20].includes(preferences.uiFontSize ?? 16)
+      ? preferences.uiFontSize
+      : undefined,
+    narrowReading: preferences.narrowReading === true,
+    markReadOnOpen: preferences.markReadOnOpen !== false,
+    codeFontFamily: isFontName(preferences.codeFontFamily)
+      ? preferences.codeFontFamily.trim()
+      : "",
+    singleKeyShortcuts: preferences.singleKeyShortcuts !== false,
     accentColor: isHexColor(preferences.accentColor)
       ? preferences.accentColor.toLowerCase()
       : "",
@@ -98,11 +109,23 @@ export function fontFamilyCss(
   return `"${escaped}", ${fallback}`;
 }
 
+export function effectiveAppearance(
+  preferences: Preferences,
+  systemDark: boolean,
+): Preferences["theme"] {
+  return preferences.followSystemTheme
+    ? systemDark
+      ? "night"
+      : "paper"
+    : preferences.theme;
+}
+
 export function appearanceVariables(
   preferences: Preferences,
+  theme = preferences.theme,
 ): Record<string, string> {
   const values = normalizePreferences(preferences);
-  const accent = resolveAccent(values.accentColor, values.theme);
+  const accent = resolveAccent(values.accentColor, theme);
   const darkText = "#231e19";
   const lightText = "#fffaf4";
   return {
@@ -113,8 +136,11 @@ export function appearanceVariables(
         : lightText,
     "--focus": accent,
     "--selected": values.accentColor
-      ? `color-mix(in srgb, ${accent} ${values.theme === "night" ? 16 : 12}%, ${themePalettes[values.theme].canvas})`
-      : themePalettes[values.theme].selected,
+      ? `color-mix(in srgb, ${accent} ${theme === "night" ? 16 : 12}%, ${themePalettes[theme].canvas})`
+      : themePalettes[theme].selected,
+    "--ui-size-offset": `${(values.uiFontSize ?? 16) - 16}px`,
+    "--reading-width": values.narrowReading ? "740px" : "1000px",
+    "--code-font": fontFamilyCss(values.codeFontFamily, codeFontFallback),
     "--ui-font": fontFamilyCss(values.uiFontFamily, uiFontFallback),
     "--reading-font": fontFamilyCss(
       values.readingFontFamily,
@@ -126,13 +152,16 @@ export function appearanceVariables(
   };
 }
 
-export function applyAppearance(preferences: Preferences): void {
-  document.documentElement.dataset.theme = preferences.theme;
+export function applyAppearance(
+  preferences: Preferences,
+  theme = preferences.theme,
+): void {
+  document.documentElement.dataset.theme = theme;
   document
     .querySelector('meta[name="theme-color"]')
-    ?.setAttribute("content", themePalettes[preferences.theme].canvas);
+    ?.setAttribute("content", themePalettes[theme].canvas);
   for (const [name, value] of Object.entries(
-    appearanceVariables(preferences),
+    appearanceVariables(preferences, theme),
   )) {
     document.documentElement.style.setProperty(name, value);
   }

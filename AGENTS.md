@@ -43,3 +43,5 @@ Build app UI in `src/`. Keep `.openai/hosting.json`, `worker/index.js`, `scripts
 - Native exit failure must offer retry, continue and export recovery. Cancelling an export must not exit. Failed loads must not initialize an existing incomplete database as an empty library.
 - Keep feed failures visible with retry; cancelling a read invalidates late results, while only the actual commit briefly blocks closing. Full backups include canonical committed content and latest unsaved reading facts.
 - Remember logical window sizes separately from screen position. Retain a single instance and native menus for existing settings and updates.
+- Keep a global settings surface with a visible gear and the macOS Settings menu and ⌘,. Put appearance, reading behavior, library maintenance, shortcuts and updates there. Keep the reader's Aa controls and the global settings on the same preferences and save queue.
+- Setting changes should patch fields. Preserve legacy defaults and keep update work alive while the settings dialog is closed or another section is selected.

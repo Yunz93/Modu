@@ -2,7 +2,9 @@ use crate::{model::Source, AppState};
 use tauri::{Emitter, Manager};
 
 pub fn theme_name(value: &serde_json::Value) -> &'static str {
-    if value["theme"] == "paper" {
+    if value["followSystemTheme"] == true {
+        "system"
+    } else if value["theme"] == "paper" {
         "paper"
     } else {
         "night"
@@ -22,9 +24,15 @@ fn appearance(theme: &str) -> (tauri::Theme, tauri::utils::config::Color) {
     }
 }
 #[tauri::command]
-pub fn set_app_appearance(window: tauri::WebviewWindow, theme: String) -> Result<(), String> {
+pub fn set_app_appearance(
+    window: tauri::WebviewWindow,
+    theme: String,
+    follow_system: bool,
+) -> Result<(), String> {
     let (theme, color) = appearance(&theme);
-    window.set_theme(Some(theme)).map_err(|e| e.to_string())?;
+    window
+        .set_theme((!follow_system).then_some(theme))
+        .map_err(|e| e.to_string())?;
     window
         .set_background_color(Some(color))
         .map_err(|e| e.to_string())
@@ -71,21 +79,28 @@ pub fn restore_subscription(
 }
 pub fn create_main_window(app: &tauri::App, theme: &str) -> tauri::Result<()> {
     let (native, color) = appearance(theme);
-    let window = tauri::WebviewWindowBuilder::from_config(app, &app.config().app.windows[0])?
+    let mut config = app.config().app.windows[0].clone();
+    if theme == "system" {
+        config.background_color = None;
+    }
+    let builder = tauri::WebviewWindowBuilder::from_config(app, &config)?
         .initialization_script(format!(
             "window.__MODU_APPEARANCE__={{theme:{}}};",
             serde_json::to_string(theme).unwrap()
         ))
-        .theme(Some(native))
-        .background_color(color)
-        .build()?;
+        .theme((theme != "system").then_some(native));
+    let window = if theme == "system" {
+        builder.build()?
+    } else {
+        builder.background_color(color).build()?
+    };
     restore_window_size(&window);
     let menu = tauri::menu::Menu::default(app.handle())?;
     if let Some(tauri::menu::MenuItemKind::Submenu(submenu)) = menu.items()?.first() {
         let settings = tauri::menu::MenuItem::with_id(
             app,
-            "reading-appearance",
-            "阅读外观…",
+            "app-settings",
+            "设置…",
             true,
             Some("CmdOrCtrl+,"),
         )?;
@@ -107,8 +122,8 @@ pub fn handle_menu(app: &tauri::AppHandle, event: tauri::menu::MenuEvent) {
         return;
     }
     match event.id().as_ref() {
-        "reading-appearance" => {
-            let _ = app.emit("modu://appearance", ());
+        "app-settings" => {
+            let _ = app.emit("modu://settings", ());
         }
         "app-updates" => {
             let _ = app.emit("modu://updates", ());

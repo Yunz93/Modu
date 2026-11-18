@@ -15,7 +15,7 @@ import { AppearanceSettings } from "./AppearanceSettings";
 import type { Article, Preferences, Source } from "./model";
 
 type Props = {
-  appearanceRequest?: number;
+  effectiveTheme: Preferences["theme"];
   article?: Article;
   source?: Source;
   saved: boolean;
@@ -27,12 +27,12 @@ type Props = {
   onRead: () => void;
   onFocus: () => void;
   onBack: () => void;
-  onPreferences: (preferences: Preferences) => void;
+  onPreferences: (preferences: Partial<Preferences>) => void;
   onPosition: (id: string, position: number) => void;
 };
 
 export function Reader({
-  appearanceRequest = 0,
+  effectiveTheme,
   article,
   source,
   saved,
@@ -48,9 +48,6 @@ export function Reader({
   onPosition,
 }: Props) {
   const [appearanceOpen, setAppearanceOpen] = useState(false);
-  useEffect(() => {
-    if (appearanceRequest) setAppearanceOpen(true);
-  }, [appearanceRequest]);
   const scroll = useRef<HTMLDivElement>(null);
   const restoring = useRef(false);
   const initialPosition = useRef(position);
@@ -115,6 +112,8 @@ export function Reader({
                 collisionPadding={12}
               >
                 <AppearanceSettings
+                  compact
+                  effectiveTheme={effectiveTheme}
                   preferences={preferences}
                   onChange={onPreferences}
                 />

@@ -12,15 +12,23 @@ import type { Preferences } from "./model";
 
 type Props = {
   preferences: Preferences;
-  onChange: (preferences: Preferences) => void;
+  compact?: boolean;
+  effectiveTheme: Preferences["theme"];
+  onChange: (preferences: Partial<Preferences>) => void;
 };
 
-export function AppearanceSettings({ preferences, onChange }: Props) {
+export function AppearanceSettings({
+  preferences,
+  effectiveTheme,
+  onChange,
+  compact = false,
+}: Props) {
   const id = useId();
   const [uiFont, setUiFont] = useState(preferences.uiFontFamily ?? "");
   const [readingFont, setReadingFont] = useState(
     preferences.readingFontFamily ?? "",
   );
+  const [codeFont, setCodeFont] = useState(preferences.codeFontFamily ?? "");
   const [feedback, setFeedback] = useState("");
   const [error, setError] = useState("");
   const accent = preferences.accentColor ?? "";
@@ -55,31 +63,47 @@ export function AppearanceSettings({ preferences, onChange }: Props) {
   ];
   const fontChoices = [
     ...new Set(
-      [...systemFonts, ...commonFonts, uiFont, readingFont].filter(Boolean),
+      [...systemFonts, ...commonFonts, uiFont, readingFont, codeFont].filter(
+        Boolean,
+      ),
     ),
   ].sort((a, b) => a.localeCompare(b));
   const presetFont = (font: "serif" | "sans") => {
     setReadingFont("");
     setFeedback("");
-    onChange({ ...preferences, font, readingFontFamily: "" });
+    onChange({ font, readingFontFamily: "" });
   };
   return (
     <div className="appearance-settings">
-      <h3>阅读外观</h3>
+      {compact && <h3>阅读外观</h3>}
       <div className="appearance-row">
         <span>外观</span>
         <div className="segmented">
           <button
-            aria-pressed={preferences.theme === "paper"}
-            onClick={() => onChange({ ...preferences, theme: "paper" })}
+            aria-pressed={
+              !preferences.followSystemTheme && preferences.theme === "paper"
+            }
+            onClick={() =>
+              onChange({ theme: "paper", followSystemTheme: false })
+            }
           >
             纸质白
           </button>
           <button
-            aria-pressed={preferences.theme === "night"}
-            onClick={() => onChange({ ...preferences, theme: "night" })}
+            aria-pressed={
+              !preferences.followSystemTheme && preferences.theme === "night"
+            }
+            onClick={() =>
+              onChange({ theme: "night", followSystemTheme: false })
+            }
           >
             金属灰
+          </button>
+          <button
+            aria-pressed={!!preferences.followSystemTheme}
+            onClick={() => onChange({ followSystemTheme: true })}
+          >
+            跟随系统
           </button>
         </div>
       </div>
@@ -88,7 +112,7 @@ export function AppearanceSettings({ preferences, onChange }: Props) {
           <h4>主题色</h4>
           <button
             className="appearance-reset"
-            onClick={() => onChange({ ...preferences, accentColor: "" })}
+            onClick={() => onChange({ accentColor: "" })}
           >
             恢复墨知配色
           </button>
@@ -103,18 +127,16 @@ export function AppearanceSettings({ preferences, onChange }: Props) {
               title={preset.name}
               style={{
                 backgroundColor:
-                  preset.color || themePalettes[preferences.theme].accent,
+                  preset.color || themePalettes[effectiveTheme].accent,
                 color:
                   contrastRatio(
-                    preset.color || themePalettes[preferences.theme].accent,
+                    preset.color || themePalettes[effectiveTheme].accent,
                     "#fffaf4",
                   ) >= 4.5
                     ? "#fffaf4"
                     : "#231e19",
               }}
-              onClick={() =>
-                onChange({ ...preferences, accentColor: preset.color })
-              }
+              onClick={() => onChange({ accentColor: preset.color })}
             >
               {accent === preset.color && <CheckIcon size={17} weight="bold" />}
             </button>
@@ -124,15 +146,14 @@ export function AppearanceSettings({ preferences, onChange }: Props) {
             <input
               type="color"
               aria-label="自定义主题色"
-              value={accent || themePalettes[preferences.theme].accent}
+              value={accent || themePalettes[effectiveTheme].accent}
               onInput={(event) =>
                 onChange({
-                  ...preferences,
                   accentColor: event.currentTarget.value,
                 })
               }
               onChange={(event) =>
-                onChange({ ...preferences, accentColor: event.target.value })
+                onChange({ accentColor: event.target.value })
               }
             />
           </label>
@@ -149,13 +170,14 @@ export function AppearanceSettings({ preferences, onChange }: Props) {
             onClick={() => {
               setUiFont("");
               setReadingFont("");
+              setCodeFont("");
               setFeedback("已恢复默认字体");
               setError("");
               onChange({
-                ...preferences,
                 font: "serif",
                 uiFontFamily: "",
                 readingFontFamily: "",
+                ...(!compact && { codeFontFamily: "" }),
               });
             }}
           >
@@ -190,9 +212,7 @@ export function AppearanceSettings({ preferences, onChange }: Props) {
               className="icon-button"
               aria-label="缩小字号"
               disabled={preferences.fontSize <= 16}
-              onClick={() =>
-                onChange({ ...preferences, fontSize: preferences.fontSize - 1 })
-              }
+              onClick={() => onChange({ fontSize: preferences.fontSize - 1 })}
             >
               <MinusIcon size={17} />
             </button>
@@ -201,9 +221,7 @@ export function AppearanceSettings({ preferences, onChange }: Props) {
               className="icon-button"
               aria-label="放大字号"
               disabled={preferences.fontSize >= 28}
-              onClick={() =>
-                onChange({ ...preferences, fontSize: preferences.fontSize + 1 })
-              }
+              onClick={() => onChange({ fontSize: preferences.fontSize + 1 })}
             >
               <PlusIcon size={17} />
             </button>
@@ -213,14 +231,18 @@ export function AppearanceSettings({ preferences, onChange }: Props) {
           className="custom-font-form"
           onSubmit={(event) => {
             event.preventDefault();
-            if (!isFontName(uiFont) || !isFontName(readingFont)) {
+            if (
+              !isFontName(uiFont) ||
+              !isFontName(readingFont) ||
+              (!compact && !isFontName(codeFont))
+            ) {
               setError("字体名称须在 100 个字符内，且不能包含换行。");
               return;
             }
             onChange({
-              ...preferences,
               uiFontFamily: uiFont.trim(),
               readingFontFamily: readingFont.trim(),
+              ...(!compact && { codeFontFamily: codeFont.trim() }),
             });
             setError("");
             setFeedback("字体已应用");
@@ -261,6 +283,24 @@ export function AppearanceSettings({ preferences, onChange }: Props) {
             maxLength={100}
             autoComplete="off"
           />
+          {!compact && (
+            <>
+              <label htmlFor={`${id}-code`}>代码字体</label>
+              <input
+                id={`${id}-code`}
+                list={`${id}-fonts`}
+                value={codeFont}
+                placeholder="系统等宽字体"
+                maxLength={100}
+                autoComplete="off"
+                aria-describedby={`${id}-font-hint`}
+                onChange={(event) => {
+                  setCodeFont(event.target.value);
+                  setFeedback("");
+                }}
+              />
+            </>
+          )}
           <datalist id={`${id}-fonts`}>
             {fontChoices.map((name) => (
               <option key={name} value={name} />
@@ -270,7 +310,7 @@ export function AppearanceSettings({ preferences, onChange }: Props) {
             {desktop
               ? `从已安装字体中选择或输入名称${systemFonts.length ? `（${systemFonts.length} 种）` : ""}。`
               : "填写本机已安装的字体名称。"}
-            未安装时使用默认字体；代码保持等宽。
+            未安装时使用对应的默认字体。
           </p>
           {fontError && (
             <p className="appearance-hint" role="status">
@@ -292,7 +332,7 @@ export function AppearanceSettings({ preferences, onChange }: Props) {
       </section>
       <p
         className="appearance-preview"
-        style={{ color: resolveAccent(accent, preferences.theme) }}
+        style={{ color: resolveAccent(accent, effectiveTheme) }}
       >
         Aa 好内容，慢慢读。
       </p>

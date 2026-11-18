@@ -26,6 +26,12 @@ export type Preferences = {
   font: "serif" | "sans";
   theme: "paper" | "night";
   accentColor?: string;
+  followSystemTheme?: boolean;
+  uiFontSize?: number;
+  narrowReading?: boolean;
+  markReadOnOpen?: boolean;
+  codeFontFamily?: string;
+  singleKeyShortcuts?: boolean;
   uiFontFamily?: string;
   readingFontFamily?: string;
 };
