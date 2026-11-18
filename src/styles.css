@@ -1411,8 +1411,8 @@ kbd {
   align-items: center;
   justify-content: center;
   gap: 20px;
-  background: #24272c;
-  color: #e3e1d9;
+  background: var(--canvas);
+  color: var(--ink);
 }
 .updates-banner {
   width: calc(100% - 32px);
@@ -1555,4 +1555,47 @@ button:disabled {
   font-size: 12px;
   padding: 10px 12px;
   color: var(--accent);
+}
+
+.feed-errors {
+  margin: 0 16px 12px;
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.7;
+}
+.feed-errors p {
+  margin: 0 0 6px;
+}
+.feed-errors strong {
+  color: var(--danger);
+}
+.feed-errors button {
+  color: var(--accent);
+  padding: 4px 8px;
+}
+.source-error-dot {
+  color: var(--danger);
+  font-size: 11px;
+}
+.recovery-error {
+  color: var(--danger);
+  max-width: 680px;
+}
+.startup-screen {
+  padding: 32px;
+  text-align: center;
+}
+.startup-screen .confirm-actions {
+  justify-content: center;
+}
+.archived-source {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 8px 0;
+}
+.archived-source button {
+  width: 100%;
 }

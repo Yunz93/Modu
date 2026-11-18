@@ -110,6 +110,37 @@ pub fn validate_library(library: &Library) -> Result<(), String> {
     {
         return Err("备份中的阅读外观无效，当前阅读库未修改。".into());
     }
+    if prefs
+        .get("autoCheckUpdates")
+        .is_some_and(|v| !v.is_boolean())
+        || prefs
+            .get("skippedUpdateVersion")
+            .is_some_and(|v| !v.is_string())
+        || prefs
+            .get("lastUpdateCheckAt")
+            .is_some_and(|v| !v.is_string())
+    {
+        return Err("阅读库中的更新偏好格式无效，原数据保持不变。".into());
+    }
+    let valid_url = |value: &str| {
+        url::Url::parse(value).ok().is_some_and(|u| {
+            ["http", "https"].contains(&u.scheme())
+                && u.username().is_empty()
+                && u.password().is_none()
+        })
+    };
+    if library.sources.iter().any(|source| {
+        source.id.is_empty()
+            || !["demo", "imported", "pending"].contains(&source.kind.as_str())
+            || !valid_url(&source.url)
+    }) || library.articles.iter().any(|article| {
+        article.id.is_empty()
+            || (!article.date.is_empty()
+                && chrono::DateTime::parse_from_rfc3339(&article.date).is_err())
+            || article.url.as_ref().is_some_and(|u| !valid_url(u))
+    }) {
+        return Err("阅读库中的订阅地址或文章日期无效，原数据保持不变。".into());
+    }
     let sources: std::collections::HashSet<_> = library.sources.iter().map(|s| &s.id).collect();
     let articles: std::collections::HashSet<_> = library.articles.iter().map(|a| &a.id).collect();
     if sources.len() != library.sources.len()

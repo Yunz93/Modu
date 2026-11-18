@@ -37,13 +37,17 @@ import {
 } from "./model";
 import { UpdateCenter } from "./UpdateCenter";
 import { Reader } from "./Reader";
-import { SubscriptionDialog } from "./SubscriptionDialog";
+import { StartupScreen } from "./StartupScreen";
+import { queueUpdates, replaceContent } from "./feed-updates";
+import { CloseRecoveryDialog } from "./CloseRecoveryDialog";
+import { SubscriptionDialog, type Submission } from "./SubscriptionDialog";
 import {
   desktop,
   native,
   persistence,
   installExitHandler,
   interceptExternalLinks,
+  listenNativeMenus,
   type Loaded,
   type Changes,
 } from "./desktop";
@@ -99,22 +103,7 @@ export function App() {
       document.removeEventListener("click", interceptExternalLinks, true);
   }, []);
   if (desktop && !loaded)
-    return (
-      <div className="startup-screen">
-        <h1>墨牍</h1>
-        <p role={error ? "alert" : "status"}>
-          {error || "正在打开本地阅读库…"}
-        </p>
-        {error && (
-          <button
-            className="primary-button"
-            onClick={() => window.location.reload()}
-          >
-            重试
-          </button>
-        )}
-      </div>
-    );
+    return <StartupScreen error={error} onLoaded={setLoaded} />;
   return <ReaderApp loaded={loaded} />;
 }
 
@@ -132,6 +121,13 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
   );
   const [library, setLibrary] = useState(initial.library);
   const [storageError, setStorageError] = useState(initial.error);
+  const [appearanceRequest, setAppearanceRequest] = useState(0);
+  const [closeError, setCloseError] = useState("");
+  const restorePending = useRef(false);
+  const [restoreBusy, setRestoreBusy] = useState(false);
+  const [restoreError, setRestoreError] = useState("");
+  const refreshPending = useRef(false);
+  const refreshAbort = useRef<AbortController | null>(null);
   const [updateOpen, setUpdateOpen] = useState(false);
   const [newVersion, setNewVersion] = useState("");
   const [installLocked, setInstallLocked] = useState(false);
@@ -198,29 +194,70 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
       clearTimeout(noticeTimer.current);
     };
   }, [persist]);
+  const flushReadingState = useCallback(async () => {
+    clearTimeout(saveTimer.current);
+    if (!nativeSave) throw Error("阅读库尚未就绪。");
+    nativeSave.enqueue({
+      ...libraryRef.current,
+      positions: { ...positions.current },
+    });
+    await nativeSave.flush();
+    return nativeSave.getRevision();
+  }, [nativeSave]);
   useEffect(() => {
     if (!nativeSave) return;
     let cleanup: (() => void) | undefined;
     let disposed = false;
-    void installExitHandler(async () => {
-      clearTimeout(saveTimer.current);
-      nativeSave.enqueue({
-        ...libraryRef.current,
-        positions: { ...positions.current },
+    void installExitHandler(
+      async () => {
+        await flushReadingState();
+      },
+      (message) => {
+        setStorageError(message);
+        setCloseError(message);
+      },
+    )
+      .then((fn) => {
+        if (disposed) fn();
+        else cleanup = fn;
+      })
+      .catch((reason) => {
+        setStorageError(String(reason));
+        setCloseError(String(reason));
       });
-      await nativeSave.flush();
-    }, setStorageError).then((fn) => {
-      if (disposed) fn();
-      else cleanup = fn;
-    });
     return () => {
       disposed = true;
       cleanup?.();
     };
-  }, [nativeSave]);
+  }, [nativeSave, flushReadingState]);
   useLayoutEffect(() => {
     applyAppearance(library.preferences);
+    if (desktop)
+      void native.setAppearance(library.preferences.theme).catch(() => {});
   }, [library.preferences]);
+  useEffect(() => {
+    if (!desktop) return;
+    let stop: (() => void) | undefined;
+    let disposed = false;
+    void listenNativeMenus(
+      () => setUpdateOpen(true),
+      () => setAppearanceRequest((n) => n + 1),
+    )
+      .then((unlisten) => {
+        if (disposed) unlisten();
+        else stop = unlisten;
+      })
+      .catch(() => {
+        if (!disposed)
+          setStorageError(
+            "原生菜单暂未连接，请使用窗口内的阅读外观和更新入口。",
+          );
+      });
+    return () => {
+      disposed = true;
+      stop?.();
+    };
+  }, []);
   useEffect(() => {
     if (searchOpen) search.current?.focus();
   }, [searchOpen]);
@@ -334,7 +371,7 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
     return () => window.removeEventListener("keydown", handle);
   }, [articles, library.selectedId, openArticle, toggleSave]);
 
-  const mergeChanges = (changes: Changes[]) => {
+  const mergeChanges = (changes: Changes[], consumePending = false) => {
     setLibrary((current) => {
       let next = current;
       for (const change of changes)
@@ -342,43 +379,84 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
           ...mergeImport(next, [change.source], change.articles),
           sources: next.sources.some((s) => s.id === change.source.id)
             ? next.sources.map((s) =>
-                s.id === change.source.id ? change.source : s,
+                s.id === change.source.id
+                  ? { ...change.source, archived: s.archived }
+                  : s,
               )
             : [...next.sources, change.source],
         };
       return {
         ...next,
-        articles: [...next.articles].sort((a, b) =>
-          b.date.localeCompare(a.date),
+        articles: [...next.articles].sort(
+          (a, b) => (Date.parse(b.date) || 0) - (Date.parse(a.date) || 0),
         ),
       };
     });
-    setUpdates([]);
+    if (consumePending) setUpdates([]);
   };
-  const refresh = async () => {
+  const refresh = async (onlySource?: string) => {
     if (!desktop) {
       notify("浏览器原型支持文件导入；桌面版可直接联网订阅。");
       return;
     }
-    if (refreshing) return;
+    if (refreshPending.current) return;
+    refreshPending.current = true;
+    const controller = new AbortController();
+    refreshAbort.current = controller;
     setRefreshing(true);
     const epoch = operation.current;
-    const changes: Changes[] = [];
+    let count = 0;
     const failures: string[] = [];
     for (const source of libraryRef.current.sources.filter(
-      (s) => s.kind !== "demo" && !s.archived,
+      (s) =>
+        s.kind !== "demo" &&
+        !s.archived &&
+        (!onlySource || s.id === onlySource),
     )) {
       try {
-        const prepared = await native.prepare(source.url, source.name);
+        const prepared = await native.prepare(
+          source.url,
+          source.name,
+          controller.signal,
+        );
         if (epoch !== operation.current) break;
-        changes.push(await native.commit(prepared));
+        const change = await native.commit(prepared);
+        // A committed feed remains available even if the next request is cancelled.
+        if (epoch !== operation.current) break;
+        count += change.newCount;
+        setLibrary((current) => ({
+          ...current,
+          sources: current.sources.map((s) =>
+            s.id === change.source.id ? { ...s, lastError: undefined } : s,
+          ),
+        }));
+        setUpdates((current) => queueUpdates(current, [change]));
       } catch (reason) {
+        if (epoch !== operation.current) break;
         failures.push(`${source.name}：${String(reason)}`);
+        try {
+          const status = await native.recordFailure(source.id, String(reason));
+          if (epoch === operation.current)
+            setLibrary((current) => ({
+              ...current,
+              sources: current.sources.map((s) =>
+                s.id === status.id ? status : s,
+              ),
+            }));
+        } catch {
+          if (epoch === operation.current)
+            setLibrary((current) => ({
+              ...current,
+              sources: current.sources.map((s) =>
+                s.id === source.id
+                  ? { ...s, lastError: `${String(reason)}（来源状态暂未保存）` }
+                  : s,
+              ),
+            }));
+        }
       }
     }
     if (epoch === operation.current) {
-      const count = changes.reduce((n, c) => n + c.newCount, 0);
-      if (changes.length) setUpdates(changes);
       notify(
         failures.length
           ? failures.join("；")
@@ -387,7 +465,20 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
             : "订阅已是最新",
       );
     }
+    if (epoch === operation.current) {
+      refreshPending.current = false;
+      setRefreshing(false);
+    }
+  };
+  const stopRefresh = () => {
+    operation.current++;
+    refreshAbort.current?.abort();
+    refreshPending.current = false;
     setRefreshing(false);
+  };
+  const cancelRefresh = () => {
+    stopRefresh();
+    notify("已停止刷新，已保存的缓存仍保留。");
   };
   const exportLibrary = async (
     name: string,
@@ -396,6 +487,12 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
   ) => {
     try {
       if (desktop) {
+        if (extension === "json")
+          contents = JSON.stringify(
+            await native.snapshot(JSON.parse(contents) as Library),
+            null,
+            2,
+          );
         if (await native.export(name, contents, extension))
           notify("已导出，可在所选位置找到文件");
       } else {
@@ -426,10 +523,15 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
       notify(String(reason));
     }
   };
-  const importFile = async (file: File): Promise<string | undefined> => {
+  const importFile = async (
+    file: File,
+    submission: Submission,
+  ): Promise<string | undefined> => {
     if (file.size > 5 * 1024 * 1024) return "请选择小于 5 MB 的订阅文件。";
     try {
-      const imported = parseFeedFile(await file.text());
+      const contents = await file.text();
+      if (!submission.isCurrent()) return "";
+      const imported = parseFeedFile(contents);
       if (desktop) {
         await nativeSave?.flush();
         const importedLibrary = mergeImport(
@@ -437,9 +539,10 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
           imported.sources,
           imported.articles,
         );
+        if (!submission.beginCommit()) return "";
         const result = await native.import(importedLibrary, false);
-        setLibrary(result.library);
-      } else
+        setLibrary((current) => replaceContent(current, result.library));
+      } else if (submission.beginCommit())
         setLibrary((current) => ({
           ...mergeImport(current, imported.sources, imported.articles),
           selectedId: imported.articles[0]?.id ?? null,
@@ -563,6 +666,11 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
             墨牍 {newVersion} 可用
           </button>
         )}
+        {refreshing && (
+          <button className="quiet-button" onClick={cancelRefresh}>
+            停止刷新
+          </button>
+        )}
         <div className="library-status">
           <button
             className="quiet-button refresh-button"
@@ -597,6 +705,31 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
                 collisionPadding={12}
               >
                 <p className="menu-caption">你的阅读库</p>
+                {desktop &&
+                  library.sources
+                    .filter((s) => s.archived)
+                    .map((source) => (
+                      <div className="archived-source" key={source.id}>
+                        <button
+                          onClick={async () => {
+                            try {
+                              await nativeSave?.flush();
+                              const result = await native.restoreSource(
+                                source.id,
+                              );
+                              setLibrary((current) =>
+                                replaceContent(current, result.library),
+                              );
+                              notify(`已恢复订阅：${source.name}`);
+                            } catch (reason) {
+                              notify(String(reason));
+                            }
+                          }}
+                        >
+                          恢复订阅：{source.name}
+                        </button>
+                      </div>
+                    ))}
                 {desktop && (
                   <button onClick={() => setUpdateOpen(true)}>
                     <ArrowClockwiseIcon size={18} />
@@ -753,7 +886,7 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
         {updates.length > 0 && (
           <button
             className="updates-banner"
-            onClick={() => mergeChanges(updates)}
+            onClick={() => mergeChanges(updates, true)}
           >
             {updates.reduce((n, c) => n + c.newCount, 0)
               ? `${updates.reduce((n, c) => n + c.newCount, 0)} 篇新文章 · 点击载入`
@@ -766,10 +899,17 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
             onClick={async () => {
               try {
                 await nativeSave?.flush();
-                operation.current++;
+                stopRefresh();
                 const result = await native.unsubscribe(activeSource.id);
-                setLibrary(result.library);
-                setSourceId(null);
+                setLibrary((current) =>
+                  replaceContent(current, result.library),
+                );
+                setUpdates((current) =>
+                  current.filter((c) => c.source.id !== activeSource.id),
+                );
+                setSourceId((current) =>
+                  current === activeSource.id ? null : current,
+                );
                 notify("已取消订阅，缓存文章和收藏仍保留");
               } catch (reason) {
                 notify(String(reason));
@@ -779,6 +919,37 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
             取消订阅
           </button>
         )}
+        {desktop &&
+          library.sources.some(
+            (s) =>
+              !s.archived && s.lastError && (!sourceId || s.id === sourceId),
+          ) && (
+            <section className="feed-errors" aria-label="订阅更新状态">
+              {library.sources
+                .filter(
+                  (s) =>
+                    !s.archived &&
+                    s.lastError &&
+                    (!sourceId || s.id === sourceId),
+                )
+                .map((source) => (
+                  <div key={source.id}>
+                    <p>
+                      <strong>{source.name} 更新失败</strong>
+                      <br />
+                      {source.lastError}
+                    </p>
+                    <button
+                      disabled={refreshing}
+                      onClick={() => void refresh(source.id)}
+                    >
+                      重试此订阅
+                    </button>
+                    <span>缓存文章仍可阅读</span>
+                  </div>
+                ))}
+            </section>
+          )}
         <div className="article-list-scroll">
           {articles.length ? (
             articles.map((item) => {
@@ -888,6 +1059,7 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
         </div>
       </section>
       <Reader
+        appearanceRequest={appearanceRequest}
         article={article}
         source={source}
         saved={!!article && library.saved.includes(article.id)}
@@ -929,17 +1101,23 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
         }}
         onNativeFile={
           desktop
-            ? async () => {
+            ? async (submission) => {
                 const file = await native.readFile(false);
-                return file
-                  ? importFile(new File([file.contents], file.name))
+                return file && submission.isCurrent()
+                  ? importFile(new File([file.contents], file.name), submission)
                   : "";
               }
             : undefined
         }
-        onAdd={async (input, name) => {
+        onAdd={async (input, name, submission) => {
           const url = httpUrl(input.trim());
           if (!url) return "请输入有效的 http 或 https 订阅地址。";
+          if (
+            library.sources.some(
+              (source) => source.url === url && source.archived,
+            )
+          )
+            return "这个来源已取消订阅，可在「阅读库选项」中恢复。";
           if (
             library.sources.some(
               (source) => source.url === url && !source.archived,
@@ -948,7 +1126,12 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
             return "这个订阅已经在阅读库中。";
           if (desktop) {
             try {
-              const prepared = await native.prepare(url, name);
+              const prepared = await native.prepare(
+                url,
+                name,
+                submission.signal,
+              );
+              if (!submission.beginCommit()) return "";
               const change = await native.commit(prepared);
               mergeChanges([change]);
               setSourceId(change.source.id);
@@ -962,6 +1145,7 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
             }
             return;
           }
+          if (!submission.beginCommit()) return "";
           const source = {
             id: `feed:${encodeURIComponent(url)}`,
             name: name.trim() || new URL(url).hostname,
@@ -1057,7 +1241,10 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
       <Dialog.Root
         open={!!restore}
         onOpenChange={(open) => {
-          if (!open) setRestore(null);
+          if (!open && !restorePending.current) {
+            setRestore(null);
+            setRestoreError("");
+          }
         }}
       >
         <Dialog.Portal>
@@ -1071,17 +1258,30 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
                 ? "恢复将替换当前本地阅读库，并自动保留恢复前的备份。"
                 : "恢复将替换当前浏览器中的阅读库；建议先导出当前备份。"}
             </Dialog.Description>
+            {restoreError && (
+              <p className="form-error" role="alert">
+                {restoreError}
+              </p>
+            )}
             <div className="confirm-actions">
-              <button className="quiet-button" onClick={() => setRestore(null)}>
+              <button
+                className="quiet-button"
+                disabled={restoreBusy}
+                onClick={() => setRestore(null)}
+              >
                 取消
               </button>
               <button
                 className="primary-button"
+                disabled={restoreBusy}
                 onClick={async () => {
-                  if (!restore) return;
+                  if (!restore || restorePending.current) return;
+                  restorePending.current = true;
+                  setRestoreBusy(true);
+                  setRestoreError("");
                   if (desktop) {
                     try {
-                      operation.current++;
+                      stopRefresh();
                       await nativeSave?.flush();
                       const result = await native.import(restore, true);
                       nativeSave?.resetRevision(result.revision);
@@ -1098,7 +1298,10 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
                       setRestore(null);
                       notify("阅读库已恢复，恢复前备份已保存");
                     } catch (reason) {
-                      notify(String(reason));
+                      setRestoreError(String(reason));
+                    } finally {
+                      restorePending.current = false;
+                      setRestoreBusy(false);
                     }
                     return;
                   }
@@ -1111,14 +1314,34 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
                   setView("all");
                   setRestore(null);
                   notify("阅读库已恢复");
+                  restorePending.current = false;
+                  setRestoreBusy(false);
                 }}
               >
-                使用此备份恢复
+                {restoreBusy ? "正在恢复…" : "使用此备份恢复"}
               </button>
             </div>
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
+      <CloseRecoveryDialog
+        error={closeError}
+        onError={setCloseError}
+        save={async () => {
+          await flushReadingState();
+        }}
+        exportBackup={async () => {
+          const snapshot = await native.snapshot({
+            ...libraryRef.current,
+            positions: { ...positions.current },
+          });
+          return native.export(
+            "墨牍-未保存阅读库备份.json",
+            JSON.stringify(snapshot, null, 2),
+            "json",
+          );
+        }}
+      />
       {desktop && (
         <UpdateCenter
           open={updateOpen}
@@ -1133,16 +1356,7 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
             if (locked) operation.current++;
             setInstallLocked(locked);
           }}
-          save={async () => {
-            clearTimeout(saveTimer.current);
-            if (!nativeSave) throw new Error("阅读库尚未就绪。");
-            nativeSave.enqueue({
-              ...libraryRef.current,
-              positions: { ...positions.current },
-            });
-            await nativeSave.flush();
-            return nativeSave.getRevision();
-          }}
+          save={flushReadingState}
         />
       )}
       <div

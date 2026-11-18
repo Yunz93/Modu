@@ -13,7 +13,20 @@ impl Database {
     pub fn open(dir: PathBuf) -> Result<Self, String> {
         fs::create_dir_all(&dir).map_err(err)?;
         let path = dir.join("library.sqlite3");
+        let existing = path.exists();
         let conn = Connection::open(&path).map_err(err)?;
+        if existing {
+            let tables: i64 = conn.query_row("SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('sources','articles','state')", [], |row| row.get(0)).map_err(err)?;
+            let has_state = tables == 3
+                && conn
+                    .query_row("SELECT EXISTS(SELECT 1 FROM state WHERE id=1)", [], |row| {
+                        row.get::<_, bool>(0)
+                    })
+                    .map_err(err)?;
+            if !has_state {
+                return Err("本地阅读库结构不完整，原数据保持不变。请从完整备份恢复。".into());
+            }
+        }
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
           CREATE TABLE IF NOT EXISTS sources(id TEXT PRIMARY KEY, data TEXT NOT NULL);
           CREATE TABLE IF NOT EXISTS articles(id TEXT PRIMARY KEY, source_id TEXT NOT NULL REFERENCES sources(id), external_key TEXT NOT NULL, data TEXT NOT NULL, UNIQUE(source_id,external_key));
@@ -48,6 +61,47 @@ impl Database {
             .and_then(|_| file.sync_all())
             .map_err(err)
     }
+    pub fn stored_preferences(&self) -> serde_json::Value {
+        self.conn
+            .query_row(
+                "SELECT json_extract(data,'$.preferences') FROM state WHERE id=1",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default()
+    }
+    pub fn record_feed_failure(&mut self, id: &str, message: &str) -> Result<Source, String> {
+        let data: String = self
+            .conn
+            .query_row("SELECT data FROM sources WHERE id=?1", [id], |r| r.get(0))
+            .map_err(err)?;
+        let mut source: Source = serde_json::from_str(&data).map_err(err)?;
+        source.last_error = Some(message.chars().take(400).collect());
+        self.conn
+            .execute(
+                "UPDATE sources SET data=?1 WHERE id=?2",
+                params![serde_json::to_string(&source).map_err(err)?, id],
+            )
+            .map_err(err)?;
+        Ok(source)
+    }
+    pub fn restore_source(&mut self, id: &str) -> Result<Loaded, String> {
+        let data: String = self
+            .conn
+            .query_row("SELECT data FROM sources WHERE id=?1", [id], |r| r.get(0))
+            .map_err(err)?;
+        let mut source: Source = serde_json::from_str(&data).map_err(err)?;
+        source.archived = false;
+        self.conn
+            .execute(
+                "UPDATE sources SET data=?1 WHERE id=?2",
+                params![serde_json::to_string(&source).map_err(err)?, id],
+            )
+            .map_err(err)?;
+        self.load()
+    }
     pub fn generation(&self) -> Result<i64, String> {
         self.conn
             .query_row("SELECT generation FROM state WHERE id=1", [], |r| r.get(0))
@@ -79,22 +133,29 @@ impl Database {
         for row in stmt.query_map([], |r| r.get::<_, String>(0)).map_err(err)? {
             articles.push(serde_json::from_str(&row.map_err(err)?).map_err(err)?);
         }
+        let library = Library {
+            version: 1,
+            sources,
+            articles,
+            read: state.read,
+            saved: state.saved,
+            positions: state.positions,
+            preferences: state.preferences,
+            selected_id: state.selected_id,
+        };
+        validate_library(&library)?;
         Ok(Loaded {
-            library: Library {
-                version: 1,
-                sources,
-                articles,
-                read: state.read,
-                saved: state.saved,
-                positions: state.positions,
-                preferences: state.preferences,
-                selected_id: state.selected_id,
-            },
+            library,
             revision,
             data_path: self.path.to_string_lossy().into(),
         })
     }
     pub fn save(&mut self, state: UserState, expected: i64) -> Result<i64, String> {
+        let check = Library {
+            preferences: state.preferences.clone(),
+            ..Library::default()
+        };
+        validate_library(&check)?;
         if state.positions.values().any(|v| !v.is_finite() || *v < 0.) {
             return Err("阅读位置无效，未保存。".into());
         }
@@ -184,6 +245,8 @@ impl Database {
             let old: Source = serde_json::from_str(&data).map_err(err)?;
             source.id = old.id;
             source.name = old.name;
+            source.archived = old.archived;
+            source.folder = old.folder;
         }
         let tx = self.conn.transaction().map_err(err)?;
         tx.execute(
@@ -333,7 +396,7 @@ mod tests {
             read: vec![],
             saved: vec![],
             positions: Default::default(),
-            preferences: serde_json::json!({}),
+            preferences: Library::default().preferences,
             selected_id: None,
         };
         assert!(db.save(state, 0).is_err());
@@ -349,5 +412,70 @@ mod tests {
         assert!(db.import(library, true).is_err());
         assert_eq!(db.load().unwrap().library.articles[0].title, "One");
         assert_eq!(db.generation().unwrap(), 0);
+    }
+    #[test]
+    fn invalid_stored_preferences_are_reported_without_writing_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = Database::open(dir.path().into()).unwrap();
+        let broken = r#"{"read":[],"saved":[],"positions":{},"preferences":{"theme":"missing","font":"serif","fontSize":23},"selectedId":null}"#;
+        db.conn
+            .execute("UPDATE state SET data=?1 WHERE id=1", [broken])
+            .unwrap();
+        assert!(db.load().is_err());
+        assert!(db
+            .save(
+                UserState {
+                    read: vec![],
+                    saved: vec![],
+                    positions: Default::default(),
+                    preferences: serde_json::json!({"theme":"night","font":"serif","fontSize":99}),
+                    selected_id: None,
+                },
+                0
+            )
+            .is_err());
+        let retained: String = db
+            .conn
+            .query_row("SELECT data FROM state WHERE id=1", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(retained, broken);
+    }
+    #[test]
+    fn incomplete_existing_database_is_not_initialized_as_an_empty_library() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("library.sqlite3");
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE retained(value TEXT); INSERT INTO retained VALUES('original');",
+        )
+        .unwrap();
+        drop(conn);
+        let original = fs::read(&path).unwrap();
+        assert!(Database::open(dir.path().into()).is_err());
+        assert_eq!(fs::read(path).unwrap(), original);
+    }
+    #[test]
+    fn source_failures_survive_restart_and_success_clears_them_without_removing_cache() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = Database::open(dir.path().into()).unwrap();
+        db.commit_feed(sample()).unwrap();
+        db.record_feed_failure("s", "HTTP 503").unwrap();
+        drop(db);
+        let mut db = Database::open(dir.path().into()).unwrap();
+        assert_eq!(
+            db.load().unwrap().library.sources[0].last_error.as_deref(),
+            Some("HTTP 503")
+        );
+        assert_eq!(db.load().unwrap().library.articles.len(), 1);
+        db.commit_feed(sample()).unwrap();
+        assert!(db.load().unwrap().library.sources[0].last_error.is_none());
+        db.remove_source("s").unwrap();
+        assert!(db.load().unwrap().library.sources[0].archived);
+        db.commit_feed(sample()).unwrap();
+        assert!(db.load().unwrap().library.sources[0].archived);
+        db.restore_source("s").unwrap();
+        let loaded = db.load().unwrap();
+        assert!(!loaded.library.sources[0].archived);
+        assert_eq!(loaded.library.articles.len(), 1);
     }
 }

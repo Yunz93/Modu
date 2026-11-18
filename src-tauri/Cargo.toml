@@ -1,7 +1,7 @@
 [package]
 name = "modu"
 version = "0.1.1"
-description = "拾读 — 本地 RSS 阅读器"
+description = "墨牍 — 本地 RSS 阅读器"
 edition = "2021"
 rust-version = "1.90"
 
@@ -33,6 +33,9 @@ uuid = { version = "1", features = ["v4"] }
 tokio = { version = "1", features = ["sync", "time", "macros"] }
 base64 = "0.22"
 minisign-verify = "0.3"
+tauri-plugin-window-state = "2"
+tauri-plugin-single-instance = "2"
+chrono = { version = "0.4.42", default-features = false, features = ["std"] }
 
 [features]
 update-qa = []
@@ -44,3 +47,6 @@ tempfile = "3"
 strip = true
 lto = "thin"
 codegen-units = 1
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-text = "22"

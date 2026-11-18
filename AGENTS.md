@@ -38,3 +38,8 @@ Build app UI in `src/`. Keep `.openai/hosting.json`, `worker/index.js`, `scripts
 - In-app updates must remain signed, tied to the announced version and repository, non-disruptive during downloads, and blocked when final reading-state save fails.
 - Keep the update signing key outside the repository. Production builds exclude the update-qa feature and all insecure QA endpoint overrides.
 - New native identity com.yunz.modu must migrate a consistent legacy com.yunz.shidu SQLite snapshot without changing the old library. Keep the browser storage key stable.
+- The user requested re-examining actual Mozi practices, updating productize-app where needed, and completing applicable implementation. Keep the adoption matrix current; distinguish existing requirements missed during execution from new skill guidance.
+- In native mode, enumerate installed fonts with CoreText while preserving manual input. Never reset typed preferences when the list arrives. Browser preview retains static suggestions.
+- Native exit failure must offer retry, continue and export recovery. Cancelling an export must not exit. Failed loads must not initialize an existing incomplete database as an empty library.
+- Keep feed failures visible with retry; cancelling a read invalidates late results, while only the actual commit briefly blocks closing. Full backups include canonical committed content and latest unsaved reading facts.
+- Remember logical window sizes separately from screen position. Retain a single instance and native menus for existing settings and updates.

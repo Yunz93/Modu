@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useId, useState, useEffect } from "react";
 import { CheckIcon, MinusIcon, PlusIcon } from "@phosphor-icons/react";
 import {
   accentPresets,
@@ -7,6 +7,7 @@ import {
   resolveAccent,
   themePalettes,
 } from "./appearance";
+import { desktop, native } from "./desktop";
 import type { Preferences } from "./model";
 
 type Props = {
@@ -23,7 +24,25 @@ export function AppearanceSettings({ preferences, onChange }: Props) {
   const [feedback, setFeedback] = useState("");
   const [error, setError] = useState("");
   const accent = preferences.accentColor ?? "";
-  const fontChoices = [
+  const [systemFonts, setSystemFonts] = useState<string[]>([]);
+  const [fontError, setFontError] = useState("");
+  useEffect(() => {
+    if (!desktop) return;
+    let active = true;
+    void native
+      .fonts()
+      .then((fonts) => {
+        if (active) setSystemFonts(fonts);
+      })
+      .catch(() => {
+        if (active)
+          setFontError("暂时无法读取字体列表，仍可输入已安装的字体名称。");
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+  const commonFonts = [
     "PingFang SC",
     "Songti SC",
     "Kaiti SC",
@@ -34,6 +53,11 @@ export function AppearanceSettings({ preferences, onChange }: Props) {
     "Georgia",
     "Times New Roman",
   ];
+  const fontChoices = [
+    ...new Set(
+      [...systemFonts, ...commonFonts, uiFont, readingFont].filter(Boolean),
+    ),
+  ].sort((a, b) => a.localeCompare(b));
   const presetFont = (font: "serif" | "sans") => {
     setReadingFont("");
     setFeedback("");
@@ -243,8 +267,16 @@ export function AppearanceSettings({ preferences, onChange }: Props) {
             ))}
           </datalist>
           <p id={`${id}-font-hint`} className="appearance-hint">
-            填写本机已安装的字体名称。未安装时使用默认字体；代码保持等宽。
+            {desktop
+              ? `从已安装字体中选择或输入名称${systemFonts.length ? `（${systemFonts.length} 种）` : ""}。`
+              : "填写本机已安装的字体名称。"}
+            未安装时使用默认字体；代码保持等宽。
           </p>
+          {fontError && (
+            <p className="appearance-hint" role="status">
+              {fontError}
+            </p>
+          )}
           <div className="font-apply-row">
             <span role="status">{feedback}</span>
             <button type="submit" className="primary-button">

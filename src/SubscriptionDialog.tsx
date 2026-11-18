@@ -7,20 +7,27 @@ import {
   RssSimpleIcon,
   XIcon,
 } from "@phosphor-icons/react";
+import { createAsyncSession } from "./async-session";
 import { desktop } from "./desktop";
 import { extraSource } from "./data";
 
+export type Submission = {
+  isCurrent: () => boolean;
+  beginCommit: () => boolean;
+  signal: AbortSignal;
+};
 type Props = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onAdd: (
     url: string,
     name: string,
+    submission: Submission,
   ) => Promise<string | undefined> | string | undefined;
   onDemo: () => void;
   demoAdded: boolean;
-  onNativeFile?: () => Promise<string | undefined>;
-  onFile: (file: File) => Promise<string | undefined>;
+  onNativeFile?: (submission: Submission) => Promise<string | undefined>;
+  onFile: (file: File, submission: Submission) => Promise<string | undefined>;
 };
 
 export function SubscriptionDialog({
@@ -35,7 +42,56 @@ export function SubscriptionDialog({
   const [url, setUrl] = useState("");
   const [name, setName] = useState("");
   const [error, setError] = useState("");
-  const [importing, setImporting] = useState(false);
+  const [stage, setStage] = useState<"idle" | "reading" | "committing">("idle");
+  const importing = stage !== "idle";
+  const active = useRef(false);
+  const abort = useRef<AbortController | null>(null);
+  const committing = useRef(false);
+  const session = useRef(createAsyncSession());
+  const begin = (): Submission => {
+    active.current = true;
+    abort.current = new AbortController();
+    const signal = abort.current.signal;
+    const isCurrent = session.current.start();
+    setStage("reading");
+    return {
+      isCurrent,
+      signal,
+      beginCommit: () => {
+        if (!isCurrent()) return false;
+        committing.current = true;
+        setStage("committing");
+        return true;
+      },
+    };
+  };
+  const run = async (
+    operation: (
+      submission: Submission,
+    ) => Promise<string | undefined> | string | undefined,
+  ) => {
+    if (active.current) return;
+    const submission = begin();
+    setError("");
+    try {
+      const error = await operation(submission);
+      if (!submission.isCurrent()) return;
+      if (error) setError(error);
+      else if (error === undefined) {
+        setUrl("");
+        setName("");
+        onOpenChange(false);
+      }
+    } catch (reason) {
+      if (submission.isCurrent()) setError(String(reason));
+    } finally {
+      if (submission.isCurrent()) {
+        active.current = false;
+        committing.current = false;
+        setStage("idle");
+      }
+    }
+  };
   const composing = useRef(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const urlInput = useRef<HTMLInputElement>(null);
@@ -43,7 +99,13 @@ export function SubscriptionDialog({
     <Dialog.Root
       open={open}
       onOpenChange={(value) => {
-        if (importing) return;
+        if (committing.current) return;
+        if (!value) {
+          session.current.cancel();
+          abort.current?.abort();
+          active.current = false;
+          setStage("idle");
+        }
         onOpenChange(value);
         if (!value) setError("");
       }}
@@ -74,18 +136,10 @@ export function SubscriptionDialog({
             <XIcon size={21} />
           </Dialog.Close>
           <form
-            onSubmit={async (event) => {
+            onSubmit={(event) => {
               event.preventDefault();
-              if (composing.current || importing) return;
-              setImporting(true);
-              const error = await onAdd(url, name);
-              setImporting(false);
-              if (error) setError(error);
-              else {
-                setUrl("");
-                setName("");
-                onOpenChange(false);
-              }
+              if (composing.current) return;
+              void run((submission) => onAdd(url, name, submission));
             }}
           >
             <label htmlFor="feed-url">订阅地址</label>
@@ -126,9 +180,11 @@ export function SubscriptionDialog({
               }}
             />
             <p className="form-note" id="feed-note">
-              {desktop
-                ? "支持 RSS / Atom，或自动寻找网页提供的订阅。文章缓存在本机，离线也能阅读。"
-                : "保存订阅地址或导入已有文章，桌面版可直接联网抓取。"}
+              {stage === "committing"
+                ? "正在保存订阅，完成前请稍候。"
+                : desktop
+                  ? "支持 RSS / Atom，或自动寻找网页提供的订阅。读取期间可以关闭取消，文章缓存在本机。"
+                  : "保存订阅地址或导入已有文章，桌面版可直接联网抓取。"}
             </p>
             <p
               className="form-error"
@@ -154,22 +210,12 @@ export function SubscriptionDialog({
             <button
               className="quiet-button"
               disabled={importing}
-              onClick={async () => {
+              onClick={() => {
                 if (!onNativeFile) {
                   fileInput.current?.click();
                   return;
                 }
-                setImporting(true);
-                setError("");
-                try {
-                  const error = await onNativeFile();
-                  if (error) setError(error);
-                  else if (error === undefined) onOpenChange(false);
-                } catch (reason) {
-                  setError(String(reason));
-                } finally {
-                  setImporting(false);
-                }
+                void run(onNativeFile);
               }}
             >
               <FileArrowUpIcon size={20} />
@@ -183,17 +229,8 @@ export function SubscriptionDialog({
               aria-label="选择订阅文件"
               onChange={async (event) => {
                 const file = event.target.files?.[0];
-                if (!file) return;
-                setImporting(true);
-                setError("");
-                try {
-                  const error = await onFile(file);
-                  if (error) setError(error);
-                  else onOpenChange(false);
-                } finally {
-                  setImporting(false);
-                  event.target.value = "";
-                }
+                if (file) await run((submission) => onFile(file, submission));
+                event.target.value = "";
               }}
             />
           </div>

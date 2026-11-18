@@ -1,7 +1,10 @@
 mod db;
+mod desktop;
+mod feed_requests;
 mod feeds;
 mod migration;
 mod model;
+mod recovery;
 pub mod update_signature;
 mod updater;
 use db::Database;
@@ -13,9 +16,12 @@ use std::sync::{
 use tauri::{Emitter, Manager};
 struct AppState {
     db: Mutex<Result<Database, String>>,
+    data_dir: std::path::PathBuf,
+    window_size: Mutex<Option<desktop::WindowSize>>,
     ready: AtomicBool,
     exiting: AtomicBool,
     updates: updater::Updates,
+    feed_requests: feed_requests::FeedRequests,
 }
 fn with_db<T>(
     state: &AppState,
@@ -35,7 +41,9 @@ fn with_db<T>(
 }
 #[tauri::command]
 fn load_library(state: tauri::State<AppState>) -> Result<Loaded, String> {
-    with_db(&state, |db| db.load())
+    let loaded = with_db(&state, |db| db.load())?;
+    state.ready.store(true, Ordering::SeqCst);
+    Ok(loaded)
 }
 #[tauri::command]
 fn save_state(
@@ -50,9 +58,39 @@ async fn prepare_feed(
     state: tauri::State<'_, AppState>,
     url: String,
     name: String,
+    request_id: Option<String>,
 ) -> Result<PreparedFeed, String> {
     let generation = with_db(&state, |db| db.generation())?;
-    feeds::prepare(url, name, generation).await
+    let request = state
+        .feed_requests
+        .start(request_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string()))?;
+    let mut cancel = request.cancel.clone();
+    if *cancel.borrow() {
+        return Err("订阅读取已取消。".into());
+    }
+    tokio::select! {biased;_=cancel.changed()=>Err("订阅读取已取消。".into()),result=feeds::prepare(url,name,generation)=>result}
+}
+#[tauri::command]
+fn cancel_feed_request(state: tauri::State<AppState>, request_id: String) {
+    state.feed_requests.cancel(request_id);
+}
+#[tauri::command]
+fn retry_library(state: tauri::State<AppState>) -> Result<Loaded, String> {
+    if state.ready.load(Ordering::SeqCst) {
+        return load_library(state);
+    }
+    let mut guard = state.db.lock().map_err(|_| "阅读库暂不可用。")?;
+    *guard = Err("正在重新打开阅读库。".into());
+    let db = migration::open_library(
+        state.data_dir.clone(),
+        std::env::var_os("MODU_DATA_DIR")
+            .or_else(|| std::env::var_os("SHIDU_DATA_DIR"))
+            .is_none(),
+    );
+    *guard = db;
+    let loaded = guard.as_ref().map_err(Clone::clone)?.load()?;
+    state.ready.store(true, Ordering::SeqCst);
+    Ok(loaded)
 }
 #[tauri::command]
 fn commit_feed(state: tauri::State<AppState>, feed: PreparedFeed) -> Result<Changes, String> {
@@ -156,7 +194,38 @@ pub fn run() {
                     && url.port() == Some(1420))
         })
         .build();
+    let window_state_file = std::env::var_os("MODU_DATA_DIR")
+        .or_else(|| std::env::var_os("SHIDU_DATA_DIR"))
+        .map(|dir| {
+            std::path::PathBuf::from(dir)
+                .join("window-state.json")
+                .to_string_lossy()
+                .into_owned()
+        })
+        .unwrap_or_else(|| "window-state.json".into());
     let app = tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _, _| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+        }))
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_filename(window_state_file)
+                .with_state_flags(
+                    tauri_plugin_window_state::StateFlags::POSITION
+                        | tauri_plugin_window_state::StateFlags::MAXIMIZED,
+                )
+                .build(),
+        )
+        .on_menu_event(desktop::handle_menu)
+        .on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::Resized(_)) {
+                desktop::remember_window_size(window);
+            }
+        })
         .plugin(navigation)
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
@@ -164,21 +233,33 @@ pub fn run() {
                 .or_else(|| std::env::var_os("SHIDU_DATA_DIR"))
                 .map(std::path::PathBuf::from)
                 .unwrap_or(app.path().app_data_dir()?);
+            let db = migration::open_library(
+                dir.clone(),
+                std::env::var_os("MODU_DATA_DIR")
+                    .or_else(|| std::env::var_os("SHIDU_DATA_DIR"))
+                    .is_none(),
+            );
+            let preferences = db
+                .as_ref()
+                .map(|db| db.stored_preferences())
+                .unwrap_or_default();
+            let theme = desktop::theme_name(&preferences);
             app.manage(AppState {
-                db: Mutex::new(migration::open_library(
-                    dir,
-                    std::env::var_os("MODU_DATA_DIR")
-                        .or_else(|| std::env::var_os("SHIDU_DATA_DIR"))
-                        .is_none(),
-                )),
+                db: Mutex::new(db),
+                data_dir: dir,
+                window_size: Mutex::new(None),
                 ready: AtomicBool::new(false),
                 exiting: AtomicBool::new(false),
                 updates: updater::Updates::default(),
+                feed_requests: feed_requests::FeedRequests::default(),
             });
+            desktop::create_main_window(app, theme)?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             load_library,
+            retry_library,
+            cancel_feed_request,
             save_state,
             prepare_feed,
             commit_feed,
@@ -193,11 +274,20 @@ pub fn run() {
             updater::check_app_update,
             updater::download_app_update,
             updater::cancel_app_update,
-            updater::install_app_update
+            updater::install_app_update,
+            desktop::list_system_fonts,
+            desktop::set_app_appearance,
+            desktop::record_feed_failure,
+            desktop::restore_subscription,
+            recovery::recover_library,
+            recovery::export_library_snapshot
         ])
         .build(tauri::generate_context!())
         .expect("无法启动墨牍");
     app.run(|app, event| {
+        if matches!(event, tauri::RunEvent::ExitRequested { .. }) {
+            desktop::persist_window_size(app);
+        }
         let state = app.state::<AppState>();
         let must_save = state.ready.load(Ordering::SeqCst) && !state.exiting.load(Ordering::SeqCst);
         match event {

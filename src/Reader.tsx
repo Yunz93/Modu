@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as Popover from "@radix-ui/react-popover";
 import {
   ArrowLeftIcon,
@@ -15,6 +15,7 @@ import { AppearanceSettings } from "./AppearanceSettings";
 import type { Article, Preferences, Source } from "./model";
 
 type Props = {
+  appearanceRequest?: number;
   article?: Article;
   source?: Source;
   saved: boolean;
@@ -31,6 +32,7 @@ type Props = {
 };
 
 export function Reader({
+  appearanceRequest = 0,
   article,
   source,
   saved,
@@ -45,6 +47,10 @@ export function Reader({
   onPreferences,
   onPosition,
 }: Props) {
+  const [appearanceOpen, setAppearanceOpen] = useState(false);
+  useEffect(() => {
+    if (appearanceRequest) setAppearanceOpen(true);
+  }, [appearanceRequest]);
   const scroll = useRef<HTMLDivElement>(null);
   const restoring = useRef(false);
   const initialPosition = useRef(position);
@@ -91,7 +97,7 @@ export function Reader({
             <BookmarkSimpleIcon size={23} weight={saved ? "fill" : "regular"} />
           </button>
           <span className="toolbar-divider" />
-          <Popover.Root>
+          <Popover.Root open={appearanceOpen} onOpenChange={setAppearanceOpen}>
             <Popover.Trigger asChild>
               <button
                 className="icon-button appearance-button"

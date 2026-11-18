@@ -6,9 +6,9 @@
     <meta name="theme-color" content="#faf8f4" />
     <script>
       try {
-        const saved = JSON.parse(
-          localStorage.getItem("shidu.library.v1") || "null",
-        );
+        const saved = window.__MODU_APPEARANCE__
+          ? { preferences: window.__MODU_APPEARANCE__ }
+          : JSON.parse(localStorage.getItem("shidu.library.v1") || "null");
         if (saved?.preferences?.theme === "night")
           document.documentElement.dataset.theme = "night";
       } catch {
