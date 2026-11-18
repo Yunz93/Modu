@@ -28,7 +28,7 @@ npm run release:manifest
 
 版本来自发布 tag，同步 package.json、锁文件、Cargo.toml、Tauri 配置。Tauri 构建入口运行实际前端构建，生成 `.app.tar.gz` 和 `.sig`。候选目录为 `release/v0.1.1/`，包含 DMG、更新包、签名、`latest.json`、SHA-256。`release:manifest` 核对清单、资产和来源，使用仓库配置中的可信公钥验签，并核对受保护的版本号。
 
-发布须先验证候选包，再上传完整资产，最后切换可发现入口。当前本机持有签名密钥并生成候选资产；GitHub 不持有签名私钥。仓库 CI 仅运行无私钥检查。更新包签名、macOS 代码签名和 Apple 公证是三种不同责任；当前 macOS 包使用 ad-hoc 代码签名，未做 Apple 公证。
+发布须先验证候选包，再上传完整资产，最后切换可发现入口。发布后运行 `npm run release:verify`，以无登录状态重新下载 GitHub 字节，校验 SHA-256、可信签名与签名版本，以及稳定端点。当前本机持有签名密钥并生成候选资产；GitHub 不持有签名私钥。仓库 CI 仅运行无私钥检查。更新包签名、macOS 代码签名和 Apple 公证是三种不同责任；当前 macOS 包使用 ad-hoc 代码签名，未做 Apple 公证。
 
 ## 验收隔离
 

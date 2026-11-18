@@ -16,7 +16,8 @@
     "test:native": "cargo test --manifest-path src-tauri/Cargo.toml",
     "package:mac": "node scripts/package-macos.mjs",
     "release:version": "node scripts/version.mjs",
-    "release:manifest": "node scripts/release-manifest.mjs"
+    "release:manifest": "node scripts/release-manifest.mjs",
+    "release:verify": "node scripts/verify-published.mjs"
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",
