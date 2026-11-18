@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#faf8f4" />
+    <script>
+      try {
+        const saved = JSON.parse(
+          localStorage.getItem("shidu.library.v1") || "null",
+        );
+        if (saved?.preferences?.theme === "night")
+          document.documentElement.dataset.theme = "night";
+      } catch {
+        /* A broken preference must not overwrite the reading library. */
+      }
+    </script>
+    <meta
+      name="description"
+      content="墨牍，把喜欢的文字放在同一个地方。安静阅读博客与技术文章的 RSS 阅读器。"
+    />
+    <title>墨牍 · 留一点时间，读点好内容</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

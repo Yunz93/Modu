@@ -1,0 +1,18 @@
+node_modules/
+dist/
+.DS_Store
+*.log
+
+src-tauri/target/
+release/
+
+# Local secrets and user-specific visual/reading-library evidence
+.env
+.env.*
+*.key
+*.key.pub
+docs/references/
+docs/screenshots/
+docs/validation/
+.qa/
+src-tauri/gen/

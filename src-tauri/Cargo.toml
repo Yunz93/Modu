@@ -1,0 +1,46 @@
+[package]
+name = "modu"
+version = "0.1.1"
+description = "拾读 — 本地 RSS 阅读器"
+edition = "2021"
+rust-version = "1.90"
+
+[lib]
+name = "modu_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip", "brotli", "charset", "stream"] }
+feed-rs = "3"
+rusqlite = { version = "0.38", features = ["bundled", "backup"] }
+url = "2"
+sha2 = "0.10"
+scraper = "0.25"
+ammonia = "4"
+percent-encoding = "2"
+open = "5"
+rfd = "0.16"
+tauri-plugin-updater = "2.14.1"
+semver = "1.0.28"
+uuid = { version = "1", features = ["v4"] }
+
+tokio = { version = "1", features = ["sync", "time", "macros"] }
+base64 = "0.22"
+minisign-verify = "0.3"
+
+[features]
+update-qa = []
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+strip = true
+lto = "thin"
+codegen-units = 1

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel>
+<title>山间来信</title><link>https://letters.example/</link><description>导入验收用订阅</description>
+<atom:link href="https://letters.example/feed.xml" rel="self" type="application/rss+xml"/>
+<item><title>在屏幕之外，寻找一点安静</title><guid isPermaLink="false">letter-001</guid><link>https://letters.example/quiet</link><pubDate>Mon, 16 Nov 2026 08:10:00 +0800</pubDate><description><![CDATA[<p>这是通过 RSS 文件导入的文章，原文链接、正文和日期均来自文件。</p><h2>从一小段散步开始</h2><p>把没有回复的消息留在口袋里，先看看今天的天空。</p><script>document.title='unsafe script executed'</script><a href="javascript:alert(1)">不安全链接</a><img src="https://tracking.invalid/pixel" onerror="alert(1)"><pre><code>const reading = 'quiet';</code></pre>]]></description></item>
+<item><title>慢下来之后看到的细节</title><guid isPermaLink="false">letter-002</guid><pubDate>Sun, 15 Nov 2026 19:35:00 +0800</pubDate><description><![CDATA[<p>同一个地方，走得慢一点，就能看见不一样的细节。</p>]]></description></item>
+</channel></rss>

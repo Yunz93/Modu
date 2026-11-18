@@ -1,0 +1,39 @@
+{
+  "name": "modu",
+  "version": "0.1.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && node scripts/prepare-sites-build.mjs",
+    "preview": "vite preview",
+    "test:sites": "node --test tests/sites-worker.test.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test tests/library.test.mjs tests/appearance.test.mjs tests/save-queue.test.mjs tests/updater.test.mjs",
+    "dev:desktop": "vite --host 127.0.0.1 --port 1420 --strictPort",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "node scripts/build-desktop.mjs",
+    "test:native": "cargo test --manifest-path src-tauri/Cargo.toml",
+    "package:mac": "node scripts/package-macos.mjs",
+    "release:version": "node scripts/version.mjs",
+    "release:manifest": "node scripts/release-manifest.mjs"
+  },
+  "dependencies": {
+    "@phosphor-icons/react": "^2.1.10",
+    "@radix-ui/react-dialog": "^1.3.1",
+    "@radix-ui/react-popover": "^1.3.1",
+    "@tauri-apps/api": "^2.12.5",
+    "@vitejs/plugin-react": "5.0.4",
+    "dompurify": "^3.4.18",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "vite": "6.4.2"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.12.5",
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "typescript": "^7.0.2"
+  }
+}

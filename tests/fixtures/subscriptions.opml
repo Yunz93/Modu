@@ -1,0 +1,1 @@
+<?xml version="1.0" encoding="utf-8"?><opml version="2.0"><head><title>验收订阅</title></head><body><outline text="博客"><outline type="rss" text="山间来信" xmlUrl="https://letters.example/feed.xml"/><outline type="rss" text="纸边札记" xmlUrl="https://paper.example/atom.xml"/></outline></body></opml>

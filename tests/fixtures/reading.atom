@@ -1,0 +1,3 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom"><title>纸边札记</title><id>urn:shidu:fixture</id><updated>2026-11-16T10:00:00Z</updated><link rel="self" href="https://paper.example/atom.xml"/>
+<entry><title>给阅读留一个书签</title><id>urn:shidu:fixture:1</id><updated>2026-11-16T10:00:00Z</updated><link href="https://paper.example/bookmark"/><content type="html">&lt;p&gt;从一页文字开始，把想法慢慢留下。&lt;/p&gt;</content></entry></feed>
