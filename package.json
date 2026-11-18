@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "test:sites": "node --test tests/sites-worker.test.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test tests/library.test.mjs tests/appearance.test.mjs tests/save-queue.test.mjs tests/updater.test.mjs",
+    "test": "node --experimental-strip-types --test tests/library.test.mjs tests/appearance.test.mjs tests/save-queue.test.mjs tests/updater.test.mjs tests/release.test.mjs",
     "dev:desktop": "vite --host 127.0.0.1 --port 1420 --strictPort",
     "tauri:dev": "tauri dev",
     "tauri:build": "node scripts/build-desktop.mjs",

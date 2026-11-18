@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
@@ -97,6 +98,43 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     ],
     { stdio: "inherit" },
   );
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "modu-release-"));
+  try {
+    const archivePath = path.join(directory, archive);
+    const entries = execFileSync("tar", ["-tzf", archivePath], {
+      encoding: "utf8",
+    })
+      .trim()
+      .split("\n");
+    if (
+      entries.some(
+        (name) =>
+          !name.startsWith("墨牍.app/") || name.split("/").includes(".."),
+      )
+    )
+      throw Error("更新包包含不合法的路径。");
+    execFileSync("tar", ["-xzf", archivePath, "-C", temporary]);
+    const app = path.join(temporary, "墨牍.app");
+    const plist = path.join(app, "Contents/Info.plist");
+    const read = (key) =>
+      execFileSync("/usr/libexec/PlistBuddy", ["-c", `Print:${key}`, plist], {
+        encoding: "utf8",
+      }).trim();
+    if (
+      read("CFBundleIdentifier") !== "com.yunz.modu" ||
+      read("CFBundleShortVersionString") !== version
+    )
+      throw Error("更新包的应用身份或版本不匹配。");
+    if (
+      execFileSync("lipo", ["-archs", path.join(app, "Contents/MacOS/modu")], {
+        encoding: "utf8",
+      }).trim() !== "arm64"
+    )
+      throw Error("更新包架构不匹配。");
+    execFileSync("codesign", ["--verify", "--deep", "--strict", app]);
+  } finally {
+    fs.rmSync(temporary, { recursive: true, force: true });
+  }
   const checks = fs
     .readdirSync(directory)
     .filter((name) => name !== "SHA256SUMS.txt")
