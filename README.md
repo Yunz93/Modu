@@ -23,6 +23,22 @@
 
 拾读 0.1.0 需要手动安装一次墨牍。首次启动墨牍前先退出拾读，墨牍会自动复制旧阅读库。之后可在阅读库菜单中检查更新。
 
+## macOS 一键安装
+
+在 Apple Silicon Mac 的终端运行以下命令。脚本从 GitHub Releases 下载最新正式版，校验安装包后安装到 `/Applications/墨牍.app` 并打开。使用中的墨牍或拾读请先用 ⌘Q 退出。
+
+```sh
+(set -o pipefail; curl -fsSL https://raw.githubusercontent.com/Yunz93/Modu/main/scripts/install-macos.sh | /bin/bash)
+```
+
+只需 macOS 自带工具。可设定安装目录、正式版本和是否安装后打开，例如：
+
+```sh
+(set -o pipefail; curl -fsSL https://raw.githubusercontent.com/Yunz93/Modu/main/scripts/install-macos.sh | INSTALL_DIR="$HOME/Applications" RELEASE_TAG=v0.1.1 OPEN_APP=0 /bin/bash)
+```
+
+脚本安装的是 GitHub 已发布的版本。它只替换应用包，阅读库继续使用原路径。
+
 ## 开发
 
 需要 Node.js 22.22+、Rust 1.90+ 和 macOS Command Line Tools。
