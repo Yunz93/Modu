@@ -1,3 +1,4 @@
+import { translate } from "./locale";
 import { useEffect, useRef, useState } from "react";
 import {
   ArrowClockwiseIcon,
@@ -47,6 +48,8 @@ const emptyProgress: DownloadProgress = {
 };
 const size = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 export function useUpdateCenter(props: Props) {
+  const locale = props.preferences.locale ?? "zh-CN";
+  const t = translate[locale];
   const latest = useRef(props);
   latest.current = props;
   const [version, setVersion] = useState("");
@@ -85,7 +88,7 @@ export function useUpdateCenter(props: Props) {
       setUpdate(next);
       setPhase(next ? "available" : "latest");
       setMessage(
-        next ? `墨牍 ${next.version} 有新版本可用。` : "当前已是最新版本。",
+        next ? "墨牍 {0} 有新版本可用。" : "当前已是最新版本。",
       );
       current.onAvailable(next?.version ?? "");
     } catch (reason) {
@@ -176,17 +179,17 @@ export function useUpdateCenter(props: Props) {
   const lastChecked = props.preferences.lastUpdateCheckAt;
   const label =
     phase === "saving"
-      ? "正在保存"
+      ? t("正在保存")
       : phase === "installing"
-        ? "正在安装"
+        ? t("正在安装")
         : phase === "ready"
-          ? "安装并重启"
-          : "下载更新";
+          ? t("安装并重启")
+          : t("下载更新");
   return (
     <div className="update-panel" data-update-dialog aria-busy={locked}>
       <div className="app-version">
-        <strong>墨牍</strong>
-        <span>版本 {version || "…"} · Apple Silicon</span>
+        <strong>{t("墨牍")}</strong>
+        <span>{t("版本 {0}", [version || "…"])} · Apple Silicon</span>
       </div>
       <label className="update-auto">
         <input
@@ -199,30 +202,30 @@ export function useUpdateCenter(props: Props) {
             })
           }
         />
-        自动检查更新<span>仅提示，不自动安装</span>
+        {t("自动检查更新")}<span>{t("仅提示，不自动安装")}</span>
       </label>
       <div
         className="update-status"
         role={phase === "error" ? "alert" : "status"}
         aria-live="polite"
       >
-        <p>{message || "可随时检查新版本。更新前会保存阅读进度并保留备份。"}</p>
+        <p>{t(message || "可随时检查新版本。更新前会保存阅读进度并保留备份。", [update?.version])}</p>
         {lastChecked && (
           <small>
-            最近成功检查：{new Date(lastChecked).toLocaleString("zh-CN")}
+            {t("最近成功检查：{0}", [new Date(lastChecked).toLocaleString(locale)])}
           </small>
         )}
       </div>
       {update && (
         <section className="release-notes">
-          <h3>墨牍 {update.version}</h3>
-          <p>{update.notes || "此版本包含体验改进和问题修复。"}</p>
+          <h3>{t("墨牍")} {update.version}</h3>
+          <p>{update.notes || t("此版本包含体验改进和问题修复。")}</p>
         </section>
       )}
       {downloading && (
         <div className="update-progress">
           <progress
-            aria-label="更新下载进度"
+            aria-label={t("更新下载进度")}
             max={progress.total ?? undefined}
             value={
               progress.total
@@ -232,10 +235,10 @@ export function useUpdateCenter(props: Props) {
           />
           <p>
             {progress.verifying
-              ? "正在验证签名"
+              ? t("正在验证签名")
               : progress.total
                 ? `${size(progress.received)} / ${size(progress.total)}`
-                : `已下载 ${size(progress.received)}`}
+                : t("已下载 {0}", [size(progress.received)])}
           </p>
         </div>
       )}
@@ -243,10 +246,10 @@ export function useUpdateCenter(props: Props) {
         {downloading ? (
           <>
             <button className="quiet-button" onClick={() => void cancel()}>
-              取消下载
+              {t("取消下载")}
             </button>
             <button className="quiet-button" onClick={props.onContinue}>
-              继续阅读
+              {t("继续阅读")}
             </button>
           </>
         ) : (
@@ -256,7 +259,7 @@ export function useUpdateCenter(props: Props) {
             onClick={() => void check()}
           >
             <ArrowClockwiseIcon size={18} />
-            {checking ? "正在检查…" : "检查更新"}
+            {checking ? t("正在检查…") : t("检查更新")}
           </button>
         )}
         {update && !downloading && (
@@ -285,7 +288,7 @@ export function useUpdateCenter(props: Props) {
             props.onAvailable("");
           }}
         >
-          跳过这个版本
+          {t("跳过这个版本")}
         </button>
       )}
       {props.preferences.skippedUpdateVersion && !locked && (
@@ -296,11 +299,11 @@ export function useUpdateCenter(props: Props) {
             setMessage("已恢复提示，点「检查更新」查看可用版本。");
           }}
         >
-          恢复已跳过的版本提示
+          {t("恢复已跳过的版本提示")}
         </button>
       )}
       {phase === "ready" && props.libraryBusy && (
-        <p className="form-note">等待订阅操作完成后即可安装。</p>
+        <p className="form-note">{t("等待订阅操作完成后即可安装。")}</p>
       )}
       <a
         className="update-release-link quiet-button"
@@ -309,7 +312,7 @@ export function useUpdateCenter(props: Props) {
         rel="noreferrer"
       >
         <ArrowSquareOutIcon size={16} />
-        查看所有版本
+        {t("查看所有版本")}
       </a>
     </div>
   );

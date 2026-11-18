@@ -87,20 +87,21 @@ impl Database {
             .map_err(err)?;
         Ok(source)
     }
-    pub fn restore_source(&mut self, id: &str) -> Result<Loaded, String> {
+    pub fn set_source_archived(&mut self, id: &str, archived: bool) -> Result<(), String> {
+        // Keep cached articles and their reading state when a source is archived.
         let data: String = self
             .conn
             .query_row("SELECT data FROM sources WHERE id=?1", [id], |r| r.get(0))
             .map_err(err)?;
         let mut source: Source = serde_json::from_str(&data).map_err(err)?;
-        source.archived = false;
+        source.archived = archived;
         self.conn
             .execute(
                 "UPDATE sources SET data=?1 WHERE id=?2",
                 params![serde_json::to_string(&source).map_err(err)?, id],
             )
             .map_err(err)?;
-        self.load()
+        Ok(())
     }
     pub fn generation(&self) -> Result<i64, String> {
         self.conn
@@ -282,22 +283,6 @@ impl Database {
             new_count,
         })
     }
-    pub fn remove_source(&mut self, id: &str) -> Result<Loaded, String> {
-        // Unsubscribe keeps cached articles and their reading state.
-        let data: String = self
-            .conn
-            .query_row("SELECT data FROM sources WHERE id=?1", [id], |r| r.get(0))
-            .map_err(err)?;
-        let mut source: Source = serde_json::from_str(&data).map_err(err)?;
-        source.archived = true;
-        self.conn
-            .execute(
-                "UPDATE sources SET data=?1 WHERE id=?2",
-                params![serde_json::to_string(&source).map_err(err)?, id],
-            )
-            .map_err(err)?;
-        self.load()
-    }
 }
 fn external_key(a: &Article) -> String {
     a.external_id.clone().unwrap_or_else(|| {
@@ -469,11 +454,11 @@ mod tests {
         assert_eq!(db.load().unwrap().library.articles.len(), 1);
         db.commit_feed(sample()).unwrap();
         assert!(db.load().unwrap().library.sources[0].last_error.is_none());
-        db.remove_source("s").unwrap();
+        db.set_source_archived("s", true).unwrap();
         assert!(db.load().unwrap().library.sources[0].archived);
         db.commit_feed(sample()).unwrap();
         assert!(db.load().unwrap().library.sources[0].archived);
-        db.restore_source("s").unwrap();
+        db.set_source_archived("s", false).unwrap();
         let loaded = db.load().unwrap();
         assert!(!loaded.library.sources[0].archived);
         assert_eq!(loaded.library.articles.len(), 1);

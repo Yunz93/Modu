@@ -10,6 +10,7 @@
           ? { preferences: window.__MODU_APPEARANCE__ }
           : JSON.parse(localStorage.getItem("shidu.library.v1") || "null");
         const preferences = saved?.preferences;
+        if (preferences?.locale === "en") document.documentElement.lang = "en";
         if (
           preferences?.theme === "system" ||
           preferences?.followSystemTheme === true

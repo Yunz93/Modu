@@ -18,6 +18,7 @@ test("legacy appearance settings gain optional fields without resetting existing
   const result = normalizePreferences(previous);
   assert.deepEqual(result, {
     ...previous,
+    locale: "zh-CN",
     accentColor: "",
     followSystemTheme: false,
     uiFontSize: undefined,
@@ -109,14 +110,16 @@ test("system appearance resolves its palette without overwriting a manual choice
 test("reading and interface settings retain their own values and reject invalid presentation input", () => {
   const values = normalizePreferences({
     ...preferences,
-    uiFontSize: 20,
+    locale: "en",
+    uiFontSize: 19,
     narrowReading: true,
     codeFontFamily: " Menlo ",
     markReadOnOpen: false,
     singleKeyShortcuts: false,
   });
   const css = appearanceVariables(values);
-  assert.equal(css["--ui-size-offset"], "4px");
+  assert.equal(css["--ui-size-offset"], "3px");
+  assert.equal(values.locale, "en");
   assert.equal(css["--reading-width"], "740px");
   assert.match(css["--code-font"], /^"Menlo",/);
   assert.equal(values.fontSize, preferences.fontSize);
@@ -129,4 +132,20 @@ test("reading and interface settings retain their own values and reject invalid 
   });
   assert.equal(bad["--ui-size-offset"], "0px");
   assert.match(bad["--code-font"], /^"SFMono-Regular",/);
+});
+
+test("named reading fonts use local family aliases and keep the system fallback", () => {
+  const jinkai = appearanceVariables({
+    ...preferences,
+    uiFontFamily: "PingFang SC",
+    readingFontFamily: "TsangerJinKai02 W04",
+  });
+  assert.match(jinkai["--reading-font"], /"TsangerJinKai02"/);
+  assert.match(jinkai["--reading-font"], /"Songti SC"/);
+  assert.match(jinkai["--ui-font"], /^"PingFang SC",/);
+  const oldSong = appearanceVariables({
+    ...preferences,
+    readingFontFamily: "KingHwa OldSong",
+  });
+  assert.match(oldSong["--reading-font"], /"京華老宋体"/);
 });

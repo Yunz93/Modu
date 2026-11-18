@@ -1,3 +1,4 @@
+import { useTranslation } from "./locale-context";
 import { useRef, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { closeAfterSaving, closeAfterExport } from "./close-flow";
@@ -14,6 +15,7 @@ export function CloseRecoveryDialog({
   save,
   exportBackup,
 }: Props) {
+  const { t } = useTranslation();
   const [busy, setBusy] = useState(false);
   const pending = useRef(false);
   const run = async (action: () => Promise<unknown>) => {
@@ -39,9 +41,9 @@ export function CloseRecoveryDialog({
       <Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay" />
         <Dialog.Content className="shortcuts-dialog">
-          <Dialog.Title>退出前尚未保存成功</Dialog.Title>
+          <Dialog.Title>{t("退出前尚未保存成功")}</Dialog.Title>
           <Dialog.Description>
-            {error}可以继续阅读、重试保存，或导出完整备份后退出。
+            {t(error)} {t("可以继续阅读、重试保存，或导出完整备份后退出。")}
           </Dialog.Description>
           <div className="confirm-actions">
             <button
@@ -49,7 +51,7 @@ export function CloseRecoveryDialog({
               disabled={busy}
               onClick={() => onError("")}
             >
-              继续使用
+              {t("继续使用")}
             </button>
             <button
               className="quiet-button"
@@ -63,7 +65,7 @@ export function CloseRecoveryDialog({
                 )
               }
             >
-              导出备份并退出
+              {t("导出备份并退出")}
             </button>
             <button
               className="primary-button"
@@ -74,7 +76,7 @@ export function CloseRecoveryDialog({
                 )
               }
             >
-              重试保存并退出
+              {t("重试保存并退出")}
             </button>
           </div>
         </Dialog.Content>

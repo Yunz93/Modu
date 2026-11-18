@@ -3,5 +3,5 @@
   "identifier": "main",
   "description": "Only the bundled reading window receives local command and event access.",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "core:window:allow-start-dragging"]
 }

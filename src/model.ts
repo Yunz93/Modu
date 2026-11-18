@@ -18,7 +18,9 @@ export type Article = {
   externalId?: string;
 };
 export type View = "unread" | "all" | "saved";
+export type Locale = "zh-CN" | "en";
 export type Preferences = {
+  locale?: Locale;
   autoCheckUpdates?: boolean;
   skippedUpdateVersion?: string;
   lastUpdateCheckAt?: string;

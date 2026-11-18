@@ -1,5 +1,5 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
-import type { Article, Library, Source } from "./model";
+import type { Article, Library, Locale, Source } from "./model";
 import { closeAfterSaving } from "./close-flow";
 import { createSaveQueue } from "./save-queue";
 export const desktop = isTauri();
@@ -18,9 +18,11 @@ export const native = {
   fonts: () => invoke<string[]>("list_system_fonts"),
   setAppearance: (theme: string, followSystem: boolean) =>
     invoke("set_app_appearance", { theme, followSystem }),
+  setLocale: (locale: Locale) => invoke("set_app_locale", { locale }),
   recordFailure: (id: string, message: string) =>
     invoke<Source>("record_feed_failure", { id, message }),
-  restoreSource: (id: string) => invoke<Loaded>("restore_subscription", { id }),
+  setSourceArchived: (id: string, archived: boolean) =>
+    invoke<void>("set_subscription_archived", { id, archived }),
   snapshot: (library: Library) => {
     const { read, saved, positions, preferences, selectedId } = library;
     return invoke<Library>("export_library_snapshot", {
@@ -49,7 +51,6 @@ export const native = {
   commit: (feed: PreparedFeed) => invoke<Changes>("commit_feed", { feed }),
   import: (library: Library, replace: boolean) =>
     invoke<Loaded>("import_library", { library, replace }),
-  unsubscribe: (id: string) => invoke<Loaded>("unsubscribe", { id }),
   readFile: (backup: boolean) =>
     invoke<{ name: string; contents: string } | null>("import_file", {
       backup,

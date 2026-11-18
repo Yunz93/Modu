@@ -1,3 +1,4 @@
+import { useTranslation } from "./locale-context";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as Popover from "@radix-ui/react-popover";
 import {
@@ -11,11 +12,10 @@ import {
   TextAaIcon,
 } from "@phosphor-icons/react";
 import { cleanArticleHtml } from "./feed-import";
-import { AppearanceSettings } from "./AppearanceSettings";
+import { ReadingSettings, useFontChoices } from "./TypographySettings";
 import type { Article, Preferences, Source } from "./model";
 
 type Props = {
-  effectiveTheme: Preferences["theme"];
   article?: Article;
   source?: Source;
   saved: boolean;
@@ -32,7 +32,6 @@ type Props = {
 };
 
 export function Reader({
-  effectiveTheme,
   article,
   source,
   saved,
@@ -47,7 +46,9 @@ export function Reader({
   onPreferences,
   onPosition,
 }: Props) {
+  const { t, locale } = useTranslation();
   const [appearanceOpen, setAppearanceOpen] = useState(false);
+  const fonts = useFontChoices(appearanceOpen);
   const scroll = useRef<HTMLDivElement>(null);
   const restoring = useRef(false);
   const initialPosition = useRef(position);
@@ -66,11 +67,11 @@ export function Reader({
   }, [article?.id]);
 
   return (
-    <section className="reader" aria-label="文章阅读区" id="main-content">
+    <section className="reader" aria-label={t("文章阅读区")} id="main-content">
       <div className="reader-toolbar">
         <button
           className="icon-button mobile-back"
-          aria-label="返回文章列表"
+          aria-label={t("返回文章列表")}
           onClick={onBack}
         >
           <ArrowLeftIcon size={22} />
@@ -78,7 +79,7 @@ export function Reader({
         {focus && (
           <button className="quiet-button exit-focus" onClick={onFocus}>
             <ArrowsInSimpleIcon size={19} />
-            <span>退出专注</span>
+            <span>{t("退出专注")}</span>
             <kbd>Esc</kbd>
           </button>
         )}
@@ -86,9 +87,9 @@ export function Reader({
           <button
             className={`icon-button bookmark-button ${saved ? "is-saved" : ""}`}
             disabled={!article}
-            aria-label={saved ? "取消收藏" : "收藏文章"}
+            aria-label={saved ? t("取消收藏") : t("收藏文章")}
             aria-pressed={saved}
-            title={saved ? "取消收藏 · S" : "收藏 · S"}
+            title={saved ? t("取消收藏 · S") : t("收藏 · S")}
             onClick={onSave}
           >
             <BookmarkSimpleIcon size={23} weight={saved ? "fill" : "regular"} />
@@ -98,8 +99,8 @@ export function Reader({
             <Popover.Trigger asChild>
               <button
                 className="icon-button appearance-button"
-                aria-label="阅读外观"
-                title="阅读外观"
+                aria-label={t("阅读外观")}
+                title={t("阅读外观")}
               >
                 <TextAaIcon size={27} />
               </button>
@@ -111,9 +112,9 @@ export function Reader({
                 sideOffset={12}
                 collisionPadding={12}
               >
-                <AppearanceSettings
+                <ReadingSettings
                   compact
-                  effectiveTheme={effectiveTheme}
+                  fonts={fonts}
                   preferences={preferences}
                   onChange={onPreferences}
                 />
@@ -128,19 +129,19 @@ export function Reader({
             target="_blank"
             rel="noopener noreferrer"
             aria-disabled={!article?.url}
-            title={article?.url ? "在浏览器中打开" : "示例文章没有外部原文"}
+            title={article?.url ? t("在浏览器中打开") : t("示例文章没有外部原文")}
             onClick={(event) => {
               if (!article?.url) event.preventDefault();
             }}
           >
             <ArrowSquareOutIcon size={21} />
-            <span>在浏览器中打开</span>
+            <span>{t("在浏览器中打开")}</span>
           </a>
           <span className="toolbar-divider focus-divider" />
           <button
             className="quiet-button focus-button"
             aria-pressed={focus}
-            title="专注模式 · F"
+            title={t("专注模式 · F")}
             onClick={onFocus}
           >
             {focus ? (
@@ -148,7 +149,7 @@ export function Reader({
             ) : (
               <ArrowsOutSimpleIcon size={22} />
             )}
-            <span>{focus ? "退出专注" : "专注模式"}</span>
+            <span>{focus ? t("退出专注") : t("专注模式")}</span>
           </button>
         </div>
       </div>
@@ -178,18 +179,17 @@ export function Reader({
                 {article.demo && (
                   <>
                     <span className="byline-dot">·</span>
-                    <span>示例内容</span>
+                    <span>{t("示例内容")}</span>
                   </>
                 )}
                 {article.date && (
                   <>
                     <span className="byline-separator" />
                     <time dateTime={article.date}>
-                      {new Intl.DateTimeFormat("zh-CN", {
+                      {new Intl.DateTimeFormat(locale, {
                         year: "numeric",
                         month: "long",
                         day: "numeric",
-                        timeZone: "Asia/Shanghai",
                       }).format(new Date(article.date))}
                     </time>
                   </>
@@ -201,18 +201,18 @@ export function Reader({
               dangerouslySetInnerHTML={{ __html: html }}
             />
             <footer className="article-footer">
-              <span>读到这里，留一点时间想一想。</span>
+              <span>{t("读到这里，留一点时间想一想。")}</span>
               <button className="quiet-button" onClick={onRead}>
                 {read ? <CheckCircleIcon size={18} /> : <CheckIcon size={18} />}
-                {read ? "标为未读" : "标为已读"}
+                {read ? t("标为未读") : t("标为已读")}
               </button>
             </footer>
           </article>
         ) : (
           <div className="reader-empty">
             <BookmarkSimpleIcon size={36} weight="light" />
-            <h2>留一点时间，读点好内容</h2>
-            <p>从左侧选择一篇文章，开始阅读。</p>
+            <h2>{t("留一点时间，读点好内容")}</h2>
+            <p>{t("从左侧选择一篇文章，开始阅读。")}</p>
           </div>
         )}
       </div>

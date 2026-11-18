@@ -1,3 +1,4 @@
+import { useTranslation } from "./locale-context";
 import { useRef, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import {
@@ -39,6 +40,7 @@ export function SubscriptionDialog({
   onFile,
   onNativeFile,
 }: Props) {
+  const { t } = useTranslation();
   const [url, setUrl] = useState("");
   const [name, setName] = useState("");
   const [error, setError] = useState("");
@@ -125,13 +127,15 @@ export function SubscriptionDialog({
           <div className="dialog-symbol">
             <RssSimpleIcon size={25} />
           </div>
-          <Dialog.Title>添加订阅</Dialog.Title>
+          <Dialog.Title>{t("添加订阅")}</Dialog.Title>
           <Dialog.Description>
-            把喜欢的文字，放在同一个地方。
+            {desktop
+              ? t("粘贴网站或订阅链接，也可以导入订阅文件。")
+              : t("保存网站或订阅链接，也可以从文件导入文章。")}
           </Dialog.Description>
           <Dialog.Close
             className="icon-button dialog-close"
-            aria-label="关闭添加订阅"
+            aria-label={t("关闭添加订阅")}
           >
             <XIcon size={21} />
           </Dialog.Close>
@@ -142,7 +146,7 @@ export function SubscriptionDialog({
               void run((submission) => onAdd(url, name, submission));
             }}
           >
-            <label htmlFor="feed-url">订阅地址</label>
+            <label htmlFor="feed-url">{t("网站或 RSS 地址")}</label>
             <input
               id="feed-url"
               ref={urlInput}
@@ -155,7 +159,7 @@ export function SubscriptionDialog({
                 setUrl(event.target.value);
                 setError("");
               }}
-              placeholder="https://example.com/feed.xml"
+              placeholder="https://example.com/"
               aria-describedby="feed-note feed-error"
               onCompositionStart={() => {
                 composing.current = true;
@@ -165,13 +169,13 @@ export function SubscriptionDialog({
               }}
             />
             <label htmlFor="feed-name">
-              显示名称 <span>可选</span>
+              {t("显示名称")} <span>{t("可选")}</span>
             </label>
             <input
               id="feed-name"
               value={name}
               onChange={(event) => setName(event.target.value)}
-              placeholder="例如：我的独立博客"
+              placeholder={t("例如：我的独立博客")}
               onCompositionStart={() => {
                 composing.current = true;
               }}
@@ -181,17 +185,17 @@ export function SubscriptionDialog({
             />
             <p className="form-note" id="feed-note">
               {stage === "committing"
-                ? "正在保存订阅，完成前请稍候。"
+                ? t("正在保存订阅，完成前请稍候。")
                 : desktop
-                  ? "支持 RSS / Atom，或自动寻找网页提供的订阅。读取期间可以关闭取消，文章缓存在本机。"
-                  : "保存订阅地址或导入已有文章，桌面版可直接联网抓取。"}
+                  ? t("网站提供 RSS 或 Atom 时会自动识别。读取期间可以关闭取消。")
+                  : t("在桌面版打开阅读库后，可刷新获取文章。")}
             </p>
             <p
               className="form-error"
               id="feed-error"
               role={error ? "alert" : undefined}
             >
-              {error}
+              {t(error)}
             </p>
             <button
               className="primary-button add-submit"
@@ -200,10 +204,10 @@ export function SubscriptionDialog({
             >
               <PlusIcon size={19} />
               {importing
-                ? "正在读取订阅…"
+                ? t("正在读取订阅…")
                 : desktop
-                  ? "添加并获取文章"
-                  : "保存订阅地址"}
+                  ? t("添加并获取文章")
+                  : t("保存订阅地址")}
             </button>
           </form>
           <div className="dialog-alternatives">
@@ -219,14 +223,14 @@ export function SubscriptionDialog({
               }}
             >
               <FileArrowUpIcon size={20} />
-              {importing ? "正在导入" : "导入 RSS / Atom / OPML"}
+              {importing ? t("正在导入") : t("导入 RSS / Atom / OPML")}
             </button>
             <input
               ref={fileInput}
               type="file"
               accept=".xml,.rss,.atom,.opml,application/xml,text/xml"
               hidden
-              aria-label="选择订阅文件"
+              aria-label={t("选择订阅文件")}
               onChange={async (event) => {
                 const file = event.target.files?.[0];
                 if (file) await run((submission) => onFile(file, submission));
@@ -237,13 +241,13 @@ export function SubscriptionDialog({
           {!desktop && (
             <div className="demo-suggestion">
               <div>
-                <p>先试读一个新来源</p>
-                <span>{extraSource.name} · 示例订阅</span>
+                <p>{t("先试读一个新来源")}</p>
+                <span>{extraSource.name}{t(" · 示例订阅")}</span>
               </div>
               <button
                 className="icon-button"
                 aria-label={
-                  demoAdded ? "慢写周刊已添加" : "添加慢写周刊示例订阅"
+                  demoAdded ? t("慢写周刊已添加") : t("添加慢写周刊示例订阅")
                 }
                 disabled={demoAdded || importing}
                 onClick={() => {
@@ -251,7 +255,7 @@ export function SubscriptionDialog({
                   onOpenChange(false);
                 }}
               >
-                {demoAdded ? "已添加" : <ArrowRightIcon size={22} />}
+                {demoAdded ? t("已添加") : <ArrowRightIcon size={22} />}
               </button>
             </div>
           )}

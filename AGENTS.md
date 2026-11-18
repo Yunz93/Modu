@@ -45,3 +45,10 @@ Build app UI in `src/`. Keep `.openai/hosting.json`, `worker/index.js`, `scripts
 - Remember logical window sizes separately from screen position. Retain a single instance and native menus for existing settings and updates.
 - Keep a global settings surface with a visible gear and the macOS Settings menu and ⌘,. Put appearance, reading behavior, library maintenance, shortcuts and updates there. Keep the reader's Aa controls and the global settings on the same preferences and save queue.
 - Setting changes should patch fields. Preserve legacy defaults and keep update work alive while the settings dialog is closed or another section is selected.
+
+## Interface and reading settings
+
+- On macOS, extend the active canvas color under the native traffic lights. Keep the titlebar draggable and place a Phosphor open-book icon immediately left of the 墨牍 wordmark.
+- Show publication time only on the current local day, and include the year for older articles from a different year. Name the active search scope and return keyboard focus to the search trigger on Escape.
+- Archive a subscription from its source menu, offer immediate undo, and keep cached articles and reading facts. Archive and restore update the source flag without consuming pending refresh results.
+- Follow Mozi's global Interface settings structure for display language, theme, accent and UI typography. Keep article typography, line width and reading behavior in Reading. Aa shares a single reading font selector with system serif, system sans serif, Tsanger JinKai 04, KingHwa OldSong and installed or manually entered families. Resolve named presets through local fonts and show a fallback hint when a preset is unavailable. Keep monospace code typography out of the settings UI.

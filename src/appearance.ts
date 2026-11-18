@@ -12,12 +12,48 @@ export const themePalettes = {
 } as const;
 
 export const accentPresets = [
-  { name: "松绿", color: "#3f7654" },
-  { name: "雾蓝", color: "#4f7cac" },
-  { name: "陶棕", color: "#a65f44" },
-  { name: "莓紫", color: "#926486" },
-  { name: "琥珀", color: "#b38336" },
+  { name: "默认", color: "" },
+  { name: "蓝色", color: "#3b82f6" },
+  { name: "绿色", color: "#22a06b" },
+  { name: "紫色", color: "#8b5cf6" },
+  { name: "玫瑰色", color: "#db6480" },
 ];
+
+export const uiFontSizes = { min: 12, max: 22, default: 16 };
+
+export const readingFontPresets = [
+  {
+    label: "仓耳今楷 04",
+    family: "TsangerJinKai02 W04",
+    aliases: [
+      "TsangerJinKai02-W04",
+      "TsangerJinKai02",
+      "Tsanger JinKai 02",
+      "仓耳今楷02 W04",
+      "仓耳今楷 W04",
+      "仓耳今楷02",
+    ],
+  },
+  {
+    label: "京华老宋",
+    family: "KingHwa OldSong",
+    aliases: [
+      "KingHwa_OldSong",
+      "京華老宋体",
+      "京華老宋體",
+      "京华老宋体",
+      "京華老宋",
+      "京华老宋",
+    ],
+  },
+];
+
+export function readingFontPreset(family?: string) {
+  const value = family?.toLowerCase();
+  return readingFontPresets.find((preset) =>
+    [preset.family, ...preset.aliases].some((name) => name.toLowerCase() === value),
+  );
+}
 
 export function isHexColor(value: unknown): value is string {
   return typeof value === "string" && /^#[\da-f]{6}$/i.test(value);
@@ -32,10 +68,13 @@ export function isFontName(value: unknown): value is string {
 }
 
 export function normalizePreferences(preferences: Preferences): Preferences {
+  const uiFontSize = preferences.uiFontSize ?? uiFontSizes.default;
   return {
     ...preferences,
+    locale: preferences.locale === "en" ? "en" : "zh-CN",
     followSystemTheme: preferences.followSystemTheme === true,
-    uiFontSize: [14, 16, 18, 20].includes(preferences.uiFontSize ?? 16)
+    uiFontSize: Number.isInteger(uiFontSize) &&
+      uiFontSize >= uiFontSizes.min && uiFontSize <= uiFontSizes.max
       ? preferences.uiFontSize
       : undefined,
     narrowReading: preferences.narrowReading === true,
@@ -128,6 +167,14 @@ export function appearanceVariables(
   const accent = resolveAccent(values.accentColor, theme);
   const darkText = "#231e19";
   const lightText = "#fffaf4";
+  const readingFallback = values.font === "sans" ? uiFontFallback : serifFallback;
+  const readingPreset = readingFontPreset(values.readingFontFamily);
+  const readingFont = readingPreset
+    ? [readingPreset.family, ...readingPreset.aliases].reduceRight(
+        (fallback, name) => fontFamilyCss(name, fallback),
+        readingFallback,
+      )
+    : fontFamilyCss(values.readingFontFamily, readingFallback);
   return {
     "--accent": accent,
     "--accent-foreground":
@@ -138,14 +185,11 @@ export function appearanceVariables(
     "--selected": values.accentColor
       ? `color-mix(in srgb, ${accent} ${theme === "night" ? 16 : 12}%, ${themePalettes[theme].canvas})`
       : themePalettes[theme].selected,
-    "--ui-size-offset": `${(values.uiFontSize ?? 16) - 16}px`,
+    "--ui-size-offset": `${(values.uiFontSize ?? uiFontSizes.default) - uiFontSizes.default}px`,
     "--reading-width": values.narrowReading ? "740px" : "1000px",
     "--code-font": fontFamilyCss(values.codeFontFamily, codeFontFallback),
     "--ui-font": fontFamilyCss(values.uiFontFamily, uiFontFallback),
-    "--reading-font": fontFamilyCss(
-      values.readingFontFamily,
-      values.font === "sans" ? uiFontFallback : serifFallback,
-    ),
+    "--reading-font": readingFont,
     "--list-title-font": values.uiFontFamily
       ? fontFamilyCss(values.uiFontFamily, uiFontFallback)
       : serifFallback,

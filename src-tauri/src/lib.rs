@@ -105,10 +105,6 @@ fn import_library(
     with_db(&state, |db| db.import(library, replace))
 }
 #[tauri::command]
-fn unsubscribe(state: tauri::State<AppState>, id: String) -> Result<Loaded, String> {
-    with_db(&state, |db| db.remove_source(&id))
-}
-#[tauri::command]
 fn frontend_ready(state: tauri::State<AppState>) {
     state.ready.store(true, Ordering::SeqCst);
 }
@@ -244,6 +240,7 @@ pub fn run() {
                 .map(|db| db.stored_preferences())
                 .unwrap_or_default();
             let theme = desktop::theme_name(&preferences);
+            let locale = preferences["locale"].as_str().unwrap_or("zh-CN");
             app.manage(AppState {
                 db: Mutex::new(db),
                 data_dir: dir,
@@ -253,7 +250,7 @@ pub fn run() {
                 updates: updater::Updates::default(),
                 feed_requests: feed_requests::FeedRequests::default(),
             });
-            desktop::create_main_window(app, theme)?;
+            desktop::create_main_window(app, theme, locale)?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -264,7 +261,6 @@ pub fn run() {
             prepare_feed,
             commit_feed,
             import_library,
-            unsubscribe,
             frontend_ready,
             finish_exit,
             open_external,
@@ -277,8 +273,9 @@ pub fn run() {
             updater::install_app_update,
             desktop::list_system_fonts,
             desktop::set_app_appearance,
+            desktop::set_app_locale,
             desktop::record_feed_failure,
-            desktop::restore_subscription,
+            desktop::set_subscription_archived,
             recovery::recover_library,
             recovery::export_library_snapshot
         ])

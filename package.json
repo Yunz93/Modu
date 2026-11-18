@@ -1,6 +1,6 @@
 {
   "name": "modu",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "test:sites": "node --test tests/sites-worker.test.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test tests/library.test.mjs tests/appearance.test.mjs tests/save-queue.test.mjs tests/updater.test.mjs tests/release.test.mjs tests/lifecycle.test.mjs",
+    "test": "node --experimental-strip-types --test tests/library.test.mjs tests/appearance.test.mjs tests/article-date.test.mjs tests/save-queue.test.mjs tests/updater.test.mjs tests/release.test.mjs tests/lifecycle.test.mjs",
     "dev:desktop": "vite --host 127.0.0.1 --port 1420 --strictPort",
     "tauri:dev": "tauri dev",
     "tauri:build": "node scripts/build-desktop.mjs",

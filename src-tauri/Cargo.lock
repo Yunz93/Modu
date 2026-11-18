@@ -2552,7 +2552,7 @@ dependencies = [
 
 [[package]]
 name = "modu"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "ammonia",
  "base64 0.22.1",

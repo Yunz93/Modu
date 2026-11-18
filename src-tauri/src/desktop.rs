@@ -71,13 +71,39 @@ pub fn record_feed_failure(
     crate::with_db(&state, |db| db.record_feed_failure(&id, &message))
 }
 #[tauri::command]
-pub fn restore_subscription(
+pub fn set_subscription_archived(
     state: tauri::State<AppState>,
     id: String,
-) -> Result<crate::model::Loaded, String> {
-    crate::with_db(&state, |db| db.restore_source(&id))
+    archived: bool,
+) -> Result<(), String> {
+    crate::with_db(&state, |db| db.set_source_archived(&id, archived))
 }
-pub fn create_main_window(app: &tauri::App, theme: &str) -> tauri::Result<()> {
+fn menu_labels(locale: &str) -> (&'static str, &'static str) {
+    if locale == "en" {
+        ("Settings…", "Check for Updates…")
+    } else {
+        ("设置…", "检查更新…")
+    }
+}
+
+#[tauri::command]
+pub fn set_app_locale(app: tauri::AppHandle, locale: String) -> Result<(), String> {
+    let (settings, updates) = menu_labels(&locale);
+    if let Some(tauri::menu::MenuItemKind::Submenu(submenu)) =
+        app.menu()
+            .and_then(|menu| menu.items().ok())
+            .and_then(|items| items.into_iter().next())
+    {
+        for (id, label) in [("app-settings", settings), ("app-updates", updates)] {
+            if let Some(tauri::menu::MenuItemKind::MenuItem(item)) = submenu.get(id) {
+                item.set_text(label).map_err(|error| error.to_string())?;
+            }
+        }
+    }
+    Ok(())
+}
+
+pub fn create_main_window(app: &tauri::App, theme: &str, locale: &str) -> tauri::Result<()> {
     let (native, color) = appearance(theme);
     let mut config = app.config().app.windows[0].clone();
     if theme == "system" {
@@ -85,8 +111,8 @@ pub fn create_main_window(app: &tauri::App, theme: &str) -> tauri::Result<()> {
     }
     let builder = tauri::WebviewWindowBuilder::from_config(app, &config)?
         .initialization_script(format!(
-            "window.__MODU_APPEARANCE__={{theme:{}}};",
-            serde_json::to_string(theme).unwrap()
+            "window.__MODU_APPEARANCE__={};",
+            serde_json::json!({ "theme": theme, "locale": locale })
         ))
         .theme((theme != "system").then_some(native));
     let window = if theme == "system" {
@@ -96,16 +122,17 @@ pub fn create_main_window(app: &tauri::App, theme: &str) -> tauri::Result<()> {
     };
     restore_window_size(&window);
     let menu = tauri::menu::Menu::default(app.handle())?;
+    let (settings_label, updates_label) = menu_labels(locale);
     if let Some(tauri::menu::MenuItemKind::Submenu(submenu)) = menu.items()?.first() {
         let settings = tauri::menu::MenuItem::with_id(
             app,
             "app-settings",
-            "设置…",
+            settings_label,
             true,
             Some("CmdOrCtrl+,"),
         )?;
         let updates =
-            tauri::menu::MenuItem::with_id(app, "app-updates", "检查更新…", true, None::<&str>)?;
+            tauri::menu::MenuItem::with_id(app, "app-updates", updates_label, true, None::<&str>)?;
         submenu.insert(&settings, 1)?;
         submenu.insert(&updates, 2)?;
     }
