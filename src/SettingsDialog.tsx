@@ -104,7 +104,7 @@ export function SettingsDialog({
                   onClick={() => onSectionChange(value)}
                 >
                   <Icon size={18} aria-hidden="true" />
-                  {t(label)}
+                  <span>{t(label)}</span>
                 </button>
               ))}
             </nav>

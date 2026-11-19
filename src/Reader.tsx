@@ -184,7 +184,7 @@ export function Reader({
                 {article.title}
               </h1>
               <div className="article-byline">
-                <span>{source?.name}</span>
+                <span className="article-source" title={source?.name}>{source?.name}</span>
                 {article.demo && (
                   <>
                     <span className="byline-dot">·</span>

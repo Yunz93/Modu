@@ -205,6 +205,8 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
   const [fetchingFullText, setFetchingFullText] = useState<Set<string>>(new Set());
   const restoredGeneration = useRef(0);
   const searchTrigger = useRef<HTMLButtonElement>(null);
+  const selectedArticleRow = useRef<HTMLButtonElement>(null);
+  const keyboardArticle = useRef<{ id: string; moveFocus: boolean } | null>(null);
   const [focus, setFocus] = useState(false);
   const [mobileReader, setMobileReader] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
@@ -340,6 +342,14 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
   useEffect(() => {
     if (searchOpen) search.current?.focus();
   }, [searchOpen]);
+  useLayoutEffect(() => {
+    const navigation = keyboardArticle.current;
+    keyboardArticle.current = null;
+    const row = selectedArticleRow.current;
+    if (navigation?.id !== library.selectedId || !row?.getClientRects().length) return;
+    row.scrollIntoView({ block: "nearest", inline: "nearest" });
+    if (navigation.moveFocus) row.focus({ preventScroll: true });
+  }, [library.selectedId]);
   useLayoutEffect(() => {
     if (!focusUndo.current) return;
     focusUndo.current = false;
@@ -554,7 +564,13 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
           (item) => item.id === library.selectedId,
         );
         const next = articles[index + (event.key === "j" ? 1 : -1)];
-        if (next) openArticle(next.id);
+        if (next) {
+          keyboardArticle.current = {
+            id: next.id,
+            moveFocus: event.target instanceof Element && !!event.target.closest(".article-row"),
+          };
+          openArticle(next.id);
+        }
       } else if (event.key === "s") {
         event.preventDefault();
         toggleSave();
@@ -1040,22 +1056,33 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
-      <section className="article-list" aria-label={t("文章列表")}>
+      <section
+        className="article-list"
+        aria-label={t("文章列表")}
+        onKeyDown={(event) => {
+          if (!searchOpen || event.key !== "Escape" || event.nativeEvent.isComposing ||
+            event.keyCode === 229 || event.defaultPrevented || !event.currentTarget.contains(event.target as Node)) return;
+          event.preventDefault();
+          event.stopPropagation();
+          closeSearch();
+        }}
+      >
         <header className="list-header">
           <div className="list-title-row">
-            <h1>{heading}</h1>
+            <h1 title={heading}>{heading}</h1>
             <button
               className={`icon-button search-toggle ${searchOpen ? "search-active" : ""}`}
               ref={searchTrigger}
               aria-expanded={searchOpen}
+              aria-controls={searchOpen ? "article-search" : undefined}
               aria-label={searchOpen ? t("关闭搜索") : t("搜索文章")}
-              title={t("搜索 · ⌘K")}
+              title={t(searchOpen ? "关闭搜索" : "搜索 · ⌘K")}
               onClick={() => {
                 if (searchOpen) closeSearch();
                 else setSearchOpen(true);
               }}
             >
-              <MagnifyingGlassIcon size={24} />
+              {searchOpen ? <XIcon size={22} /> : <MagnifyingGlassIcon size={24} />}
             </button>
             {(
               <Popover.Root>
@@ -1125,59 +1152,59 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
               </Popover.Root>
             )}
           </div>
-          <p className="list-subtitle">
-            {wholeLibrary
-              ? t("全库 · {0} 篇文章", [articles.length])
-              : sourceId
-              ? t("{0} 篇文章{1}", [articles.length, activeSource?.kind === "demo" ? t(" · 示例订阅") : ""])
-              : view === "saved"
-                ? t("{0} 篇值得再读的文章", [articles.length])
-                : new Intl.DateTimeFormat(locale, {
-                    month: "long",
-                    day: "numeric",
-                    weekday: "long",
-                  }).format(new Date())}
-          </p>
-          {searchOpen && (<>
-            <div
-              className="search-field"
-              onKeyDown={(event) => {
-                if (event.key !== "Escape" || event.nativeEvent.isComposing || event.keyCode === 229) return;
-                event.preventDefault();
-                event.stopPropagation();
-                closeSearch();
-              }}
-            >
-              <MagnifyingGlassIcon size={17} />
-              <input
-                ref={search}
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                aria-label={listSearchLabel}
-                placeholder={listSearchLabel}
-              />
-              <button
-                className="icon-button"
-                aria-label={t("清空搜索")}
-                onClick={() => {
-                  setQuery("");
-                  search.current?.focus();
-                }}
-              >
-                <XIcon size={15} />
-              </button>
-            </div>
-            {(sourceId || view !== "all") && (
-              <div className="search-scope" role="group" aria-label={t("搜索范围")}>
-                <button aria-pressed={!searchEverywhere} onClick={() => setSearchEverywhere(false)}>
-                  {t(sourceId ? "当前订阅" : "当前列表")}
-                </button>
-                <button aria-pressed={searchEverywhere} onClick={() => setSearchEverywhere(true)}>
-                  {t("全部文章")}
-                </button>
+          {searchOpen ? (
+            <div id="article-search" className="list-search" role="search" aria-label={t("搜索文章")}>
+              <div className="search-field">
+                <MagnifyingGlassIcon size={17} aria-hidden="true" />
+                <input
+                  ref={search}
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  aria-label={listSearchLabel}
+                  placeholder={t("搜索文章")}
+                />
+                {query && (
+                  <button
+                    className="icon-button"
+                    aria-label={t("清空搜索")}
+                    onClick={() => {
+                      setQuery("");
+                      search.current?.focus();
+                    }}
+                  >
+                    <XIcon size={15} />
+                  </button>
+                )}
               </div>
-            )}
-          </>)}
+              {(sourceId || view !== "all") && (
+                <div className="search-scope" role="group" aria-label={t("搜索范围")}>
+                  <button aria-pressed={!searchEverywhere} onClick={() => setSearchEverywhere(false)}>
+                    {t(sourceId ? "当前订阅" : "当前列表")}
+                  </button>
+                  <button aria-pressed={searchEverywhere} onClick={() => setSearchEverywhere(true)}>
+                    {t("全部文章")}
+                  </button>
+                </div>
+              )}
+              <span className="sr-only" role="status">
+                {wholeLibrary
+                  ? t("全库 · {0} 篇文章", [articles.length])
+                  : t("{0} 篇文章{1}", [articles.length, ""])}
+              </span>
+            </div>
+          ) : (
+            <p className="list-subtitle">
+              {sourceId
+                ? t("{0} 篇文章{1}", [articles.length, activeSource?.kind === "demo" ? t(" · 示例订阅") : ""])
+                : view === "saved"
+                  ? t("{0} 篇值得再读的文章", [articles.length])
+                  : new Intl.DateTimeFormat(locale, {
+                      month: "long",
+                      day: "numeric",
+                      weekday: "long",
+                    }).format(new Date())}
+            </p>
+          )}
         </header>
         {archivedNotice && (
           <div className="source-notice">
@@ -1262,6 +1289,7 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
               return (
                 <button
                   key={item.id}
+                  ref={library.selectedId === item.id ? selectedArticleRow : undefined}
                   className={`article-row ${library.selectedId === item.id ? "selected" : ""} ${unread ? "unread" : "read"}`}
                   aria-current={
                     library.selectedId === item.id ? "true" : undefined
@@ -1281,7 +1309,7 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
                       {item.excerpt || t("打开文章，继续阅读。")}
                     </p>
                     <div className="article-row-meta">
-                      <span>{itemSource?.name}</span>
+                      <span className="article-source" title={itemSource?.name}>{itemSource?.name}</span>
                       <span>·</span>
                       {publication
                         ? <time dateTime={publication.dateTime}>{publication.label}</time>
@@ -1333,7 +1361,10 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
                         : t("添加博客或技术资讯，在本机安静阅读。")}
               </p>
               {query.trim() && !wholeLibrary && (sourceId || view !== "all") && (
-                <button className="quiet-button" onClick={() => setSearchEverywhere(true)}>
+                <button className="quiet-button" onClick={() => {
+                  setSearchEverywhere(true);
+                  search.current?.focus();
+                }}>
                   {t("搜索全部文章")}
                 </button>
               )}

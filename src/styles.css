@@ -276,6 +276,13 @@ body:has(.desktop-frame) {
   border-radius: 0;
   user-select: none;
 }
+.source-item .source-name,
+.article-source {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .source-row[data-open] .source-item {
   gap: 6px;
   padding-inline-end: calc(var(--source-action-width) + 6px);
@@ -394,8 +401,12 @@ body:has(.desktop-frame) {
   border-right: 1px solid var(--line);
 }
 .list-header {
-  padding: 43px 23px 24px;
+  --list-header-gutter: 23px;
+  padding: 43px var(--list-header-gutter) 24px;
   flex-shrink: 0;
+}
+.list-header:has(.list-search) {
+  padding-block-end: 14px;
 }
 .list-title-row {
   display: flex;
@@ -403,11 +414,15 @@ body:has(.desktop-frame) {
   gap: 10px;
 }
 .list-title-row > h1 {
+  display: -webkit-box;
   min-width: 0;
   font-size: calc(30px + var(--ui-size-offset, 0px));
   font-weight: 650;
   line-height: 1.4;
   overflow-wrap: anywhere;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 .search-toggle {
   margin-left: auto;
@@ -447,16 +462,22 @@ body:has(.desktop-frame) {
   margin-top: 4px;
 }
 .search-scope {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-  margin-top: 8px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  border-top: 1px solid var(--soft-line);
+  padding-top: 4px;
 }
 .search-scope button {
   border-radius: var(--radius-small);
   color: var(--muted);
-  padding: 5px 8px;
+  padding: 5px 6px;
+  min-height: 28px;
   font-size: max(11px, calc(13px + var(--ui-size-offset, 0px)));
+  overflow-wrap: anywhere;
+}
+.search-scope button:focus-visible {
+  outline-offset: -2px;
 }
 .search-scope button[aria-pressed="true"],
 .list-operations button[aria-pressed="true"] {
@@ -533,15 +554,23 @@ body:has(.desktop-frame) {
   margin-left: auto;
   color: var(--accent);
 }
+.list-search {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  margin-top: 10px;
+  padding: 4px;
+  background: var(--canvas);
+}
+.list-search:has(input:focus-visible) {
+  border-color: var(--focus);
+}
 .search-field {
   display: flex;
   align-items: center;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-small);
-  margin-top: 17px;
-  padding-left: 10px;
-  gap: 6px;
-  background: var(--canvas);
+  gap: 7px;
+  min-height: 34px;
+  padding-inline: 6px 2px;
+  color: var(--muted);
 }
 .search-field input {
   width: 100%;
@@ -549,13 +578,16 @@ body:has(.desktop-frame) {
   background: none;
   color: var(--ink);
   border: 0;
-  padding: 9px 0;
+  padding: 7px 0;
   font-size: calc(14px + var(--ui-size-offset, 0px));
+}
+.search-field input:focus-visible {
+  outline: none;
 }
 .search-field .icon-button {
   min-width: 30px;
   width: 30px;
-  height: 34px;
+  height: 30px;
 }
 .reader {
   display: flex;
@@ -1098,7 +1130,12 @@ kbd {
     display: flex;
   }
   .list-header {
-    padding: var(--sidebar-toggle-top) 20px 24px var(--sidebar-heading-inset);
+    --list-header-gutter: 20px;
+    padding-block-start: var(--sidebar-toggle-top);
+  }
+  .list-title-row,
+  .list-subtitle {
+    margin-inline-start: calc(var(--sidebar-heading-inset) - var(--list-header-gutter));
   }
   .list-title-row {
     gap: 5px;
@@ -1736,8 +1773,11 @@ body:has(.desktop-frame) .settings-dialog {
   min-height: 38px;
   border-radius: var(--radius-small);
   font-size: calc(14px + var(--ui-size-offset, 0px));
-  white-space: nowrap;
+  text-align: left;
+  white-space: normal;
 }
+.settings-nav button svg { flex-shrink: 0; }
+.settings-nav button span { min-width: 0; overflow-wrap: anywhere; }
 .settings-nav button[aria-current] {
   background: var(--selected);
   color: var(--accent);
@@ -1801,7 +1841,7 @@ body:has(.desktop-frame) .settings-dialog {
   .settings-title { padding: 12px 16px 4px; }
   .settings-footer { padding: 8px 16px 12px; }
   .settings-nav { display: flex; overflow-x: auto; gap: 4px; border-right: 0; border-bottom: 1px solid var(--line); padding: 7px; }
-  .settings-nav button { width: auto; flex: none; margin: 0; padding-inline: 8px; }
+  .settings-nav button { width: auto; flex: none; margin: 0; padding-inline: 8px; white-space: nowrap; }
   .settings-nav svg { display: none; }
   .settings-pane { padding: 16px; }
   .settings-row { gap: 8px; }
