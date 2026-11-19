@@ -1,5 +1,19 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::LazyLock;
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FontSizes {
+    min: i64,
+    default: i64,
+    legacy_reading_max: i64,
+}
+
+static FONT_SIZES: LazyLock<FontSizes> = LazyLock::new(|| {
+    serde_json::from_str(include_str!("../../src/font-sizes.json"))
+        .expect("valid bundled font size settings")
+});
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -12,6 +26,8 @@ pub struct Source {
     pub archived: bool,
     #[serde(default)]
     pub folder: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub folder_path: Vec<String>,
     #[serde(default)]
     pub last_success: Option<String>,
     #[serde(default)]
@@ -26,6 +42,8 @@ pub struct Article {
     pub title: String,
     pub excerpt: String,
     pub html: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub full_text_html: Option<String>,
     pub date: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
@@ -56,7 +74,7 @@ impl Default for Library {
             read: vec![],
             saved: vec![],
             positions: HashMap::new(),
-            preferences: serde_json::json!({"fontSize":23,"font":"serif","theme":"night","accentColor":"","uiFontFamily":"","readingFontFamily":""}),
+            preferences: serde_json::json!({"fontSize":FONT_SIZES.default,"font":"sans","theme":"night","accentColor":"","uiFontFamily":"","readingFontFamily":""}),
             selected_id: None,
         }
     }
@@ -84,6 +102,13 @@ pub struct PreparedFeed {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ImportedContent {
+    pub sources: Vec<Source>,
+    pub articles: Vec<Article>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Changes {
     pub source: Source,
     pub articles: Vec<Article>,
@@ -102,11 +127,13 @@ pub fn validate_library(library: &Library) -> Result<(), String> {
         return Err("不支持这个备份版本，当前阅读库未修改。".into());
     }
     let prefs = &library.preferences;
+    // Older libraries may contain a size above the current slider maximum.
+    let reading_size_range = FONT_SIZES.min as f64..=FONT_SIZES.legacy_reading_max as f64;
     if !["paper", "night"].contains(&prefs["theme"].as_str().unwrap_or(""))
         || !["serif", "sans"].contains(&prefs["font"].as_str().unwrap_or(""))
         || !prefs["fontSize"]
             .as_f64()
-            .is_some_and(|n| n.is_finite() && (16.0..=28.0).contains(&n))
+            .is_some_and(|n| reading_size_range.contains(&n))
     {
         return Err("备份中的阅读外观无效，当前阅读库未修改。".into());
     }
@@ -131,6 +158,7 @@ pub fn validate_library(library: &Library) -> Result<(), String> {
     };
     if library.sources.iter().any(|source| {
         source.id.is_empty()
+            || source.folder_path.len() > 32
             || !["demo", "imported", "pending"].contains(&source.kind.as_str())
             || !valid_url(&source.url)
     }) || library.articles.iter().any(|article| {

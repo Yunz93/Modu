@@ -1,16 +1,17 @@
 import { useTranslation } from "./locale-context";
 import { useEffect, useId, useRef, useState } from "react";
-import { CaretDownIcon, MinusIcon, PlusIcon } from "@phosphor-icons/react";
+import { CaretDownIcon } from "@phosphor-icons/react";
 import { isFontName, readingFontPreset, readingFontPresets } from "./appearance";
 import { desktop, native } from "./desktop";
 import type { Preferences } from "./model";
+import { fontSizes, type FontSizeRange } from "./font-sizes";
 
 const commonFonts = [
   "Arial", "Avenir Next", "Georgia", "Heiti SC", "Helvetica Neue",
   "Kaiti SC", "PingFang SC", "Songti SC", "Times New Roman",
 ];
 const manualOption = "\u0001";
-const sansOption = "\u0002";
+const systemSerif = "Songti SC";
 
 export function useFontChoices(open: boolean) {
   const [installed, setInstalled] = useState<string[] | null>(null);
@@ -114,6 +115,36 @@ type ReadingProps = {
   compact?: boolean;
 };
 
+type FontSizeFieldProps = {
+  label: string;
+  range: FontSizeRange;
+  value: number;
+  onChange: (size: number) => void;
+};
+
+export function FontSizeField({ label, range, value, onChange }: FontSizeFieldProps) {
+  const id = useId();
+  return (
+    <div className="setting-field">
+      <div className="setting-range-heading">
+        <label className="setting-label" htmlFor={id}>{label}</label>
+        <output htmlFor={id} aria-hidden="true">{value} px</output>
+      </div>
+      <input
+        className="setting-range"
+        id={id}
+        type="range"
+        min={range.min}
+        max={range.max}
+        step={fontSizes.step}
+        value={value}
+        aria-valuetext={`${value} px`}
+        onChange={(event) => onChange(event.currentTarget.valueAsNumber)}
+      />
+    </div>
+  );
+}
+
 export function ReadingSettings({
   preferences, fonts, onChange, compact = false,
 }: ReadingProps) {
@@ -124,51 +155,63 @@ export function ReadingSettings({
     !fonts.installed.some((family) => readingFontPreset(family) === preset);
   return (
     <div className="reading-settings">
-      {compact && <h3>{t("阅读外观")}</h3>}
       <div className="setting-field">
         <FontFamilyField
           label={t("阅读字体")}
-          defaultLabel={t("系统宋体")}
-          value={storedFamily || (preferences.font === "sans" ? sansOption : "")}
-          fonts={fonts.names.filter((name) => !readingFontPreset(name))}
+          defaultLabel={t("系统默认字体")}
+          value={storedFamily ?? ""}
+          fonts={fonts.names.filter((name) => name !== systemSerif && !readingFontPreset(name))}
           presets={[
-            { value: sansOption, label: t("系统黑体") },
+            { value: systemSerif, label: t("系统宋体") },
             ...readingFontPresets.map(({ family, label }) => ({ value: family, label: t(label) })),
           ]}
           onChange={(readingFontFamily) => {
-            if (readingFontFamily === "" || readingFontFamily === sansOption) {
-              onChange({ font: readingFontFamily === sansOption ? "sans" : "serif", readingFontFamily: "" });
-            } else {
-              onChange({ readingFontFamily });
-            }
+            onChange({ font: readingFontFamily === systemSerif ? "serif" : "sans", readingFontFamily });
           }}
         />
         {missing && (
           <p className="setting-hint" role="status">{t("本机尚未安装 {0}，暂用系统字体。", [t(preset.label)])}</p>
         )}
       </div>
-      <div className="appearance-row">
-        <span>{t("正文字号")}</span>
-        <div className="stepper">
-          <button
-            className="icon-button"
-            aria-label={t("缩小正文字号")}
-            disabled={preferences.fontSize <= 16}
-            onClick={() => onChange({ fontSize: preferences.fontSize - 1 })}
-          >
-            <MinusIcon size={17} />
-          </button>
-          <output aria-label={t("正文字号")}>{preferences.fontSize}</output>
-          <button
-            className="icon-button"
-            aria-label={t("放大正文字号")}
-            disabled={preferences.fontSize >= 28}
-            onClick={() => onChange({ fontSize: preferences.fontSize + 1 })}
-          >
-            <PlusIcon size={17} />
-          </button>
+      {!compact && (
+        <div>
+          <label className="settings-row">
+            <span>
+              {t("正文行宽")}<small>{t("窄版在宽窗口中缩短每行文字。")}</small>
+            </span>
+            <select
+              value={preferences.narrowReading ? "narrow" : "standard"}
+              onChange={(event) =>
+                onChange({
+                  narrowReading: event.target.value === "narrow",
+                })
+              }
+            >
+              <option value="standard">{t("标准")}</option>
+              <option value="narrow">{t("窄版")}</option>
+            </select>
+          </label>
+          <label className="settings-row">
+            <span>
+              {t("打开文章时标为已读")}
+              <small>{t("关闭后可在正文底部手动标为已读。")}</small>
+            </span>
+            <input
+              type="checkbox"
+              checked={preferences.markReadOnOpen !== false}
+              onChange={(event) =>
+                onChange({ markReadOnOpen: event.target.checked })
+              }
+            />
+          </label>
         </div>
-      </div>
+      )}
+      <FontSizeField
+        label={t("正文字号")}
+        range={fontSizes}
+        value={preferences.fontSize}
+        onChange={(fontSize) => onChange({ fontSize })}
+      />
     </div>
   );
 }

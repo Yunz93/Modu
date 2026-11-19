@@ -2552,16 +2552,18 @@ dependencies = [
 
 [[package]]
 name = "modu"
-version = "0.1.3"
+version = "0.2.0"
 dependencies = [
  "ammonia",
  "base64 0.22.1",
  "chrono",
  "core-text",
+ "encoding_rs",
  "feed-rs",
  "minisign-verify",
  "open",
  "percent-encoding",
+ "quick-xml 0.42.0",
  "reqwest 0.12.28",
  "rfd",
  "rusqlite",
@@ -3313,6 +3315,7 @@ checksum = "41b1177fdf999d2321d3fb46ff47159d9c1fb9ad66a4879f8c50a0b504615e9b"
 dependencies = [
  "encoding_rs",
  "memchr",
+ "serde",
 ]
 
 [[package]]

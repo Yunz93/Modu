@@ -1,9 +1,11 @@
 import type { Preferences } from "./model";
+import {
+  fontSizes, isFontSizeInRange, storedReadingSizeRange, storedUiSizeRange,
+} from "./font-sizes.ts";
 
 export const uiFontFallback =
   '-apple-system, BlinkMacSystemFont, "PingFang SC", "Noto Sans SC", sans-serif';
 export const codeFontFallback = '"SFMono-Regular", Consolas, monospace';
-const serifFallback = 'Georgia, "Songti SC", "Noto Serif SC", serif';
 
 // Sampled from the user's Mozi screenshots; workspace.css confirms the roles.
 export const themePalettes = {
@@ -18,8 +20,6 @@ export const accentPresets = [
   { name: "紫色", color: "#8b5cf6" },
   { name: "玫瑰色", color: "#db6480" },
 ];
-
-export const uiFontSizes = { min: 12, max: 22, default: 16 };
 
 export const readingFontPresets = [
   {
@@ -68,15 +68,15 @@ export function isFontName(value: unknown): value is string {
 }
 
 export function normalizePreferences(preferences: Preferences): Preferences {
-  const uiFontSize = preferences.uiFontSize ?? uiFontSizes.default;
+  const { fontSize, uiFontSize } = preferences;
   return {
     ...preferences,
     locale: preferences.locale === "en" ? "en" : "zh-CN",
     followSystemTheme: preferences.followSystemTheme === true,
-    uiFontSize: Number.isInteger(uiFontSize) &&
-      uiFontSize >= uiFontSizes.min && uiFontSize <= uiFontSizes.max
-      ? preferences.uiFontSize
-      : undefined,
+    uiFontSize: Number.isInteger(uiFontSize) && isFontSizeInRange(uiFontSize, storedUiSizeRange)
+      ? Math.min(uiFontSize, fontSizes.max) : undefined,
+    fontSize: isFontSizeInRange(fontSize, storedReadingSizeRange)
+      ? Math.min(Math.round(fontSize), fontSizes.max) : fontSizes.default,
     narrowReading: preferences.narrowReading === true,
     markReadOnOpen: preferences.markReadOnOpen !== false,
     codeFontFamily: isFontName(preferences.codeFontFamily)
@@ -164,17 +164,17 @@ export function appearanceVariables(
   theme = preferences.theme,
 ): Record<string, string> {
   const values = normalizePreferences(preferences);
+  const uiSize = values.uiFontSize ?? fontSizes.default;
   const accent = resolveAccent(values.accentColor, theme);
   const darkText = "#231e19";
   const lightText = "#fffaf4";
-  const readingFallback = values.font === "sans" ? uiFontFallback : serifFallback;
   const readingPreset = readingFontPreset(values.readingFontFamily);
   const readingFont = readingPreset
     ? [readingPreset.family, ...readingPreset.aliases].reduceRight(
         (fallback, name) => fontFamilyCss(name, fallback),
-        readingFallback,
+        uiFontFallback,
       )
-    : fontFamilyCss(values.readingFontFamily, readingFallback);
+    : fontFamilyCss(values.readingFontFamily, uiFontFallback);
   return {
     "--accent": accent,
     "--accent-foreground":
@@ -185,14 +185,14 @@ export function appearanceVariables(
     "--selected": values.accentColor
       ? `color-mix(in srgb, ${accent} ${theme === "night" ? 16 : 12}%, ${themePalettes[theme].canvas})`
       : themePalettes[theme].selected,
-    "--ui-size-offset": `${(values.uiFontSize ?? uiFontSizes.default) - uiFontSizes.default}px`,
+    "--ui-font-size": `${uiSize}px`,
+    "--ui-size-offset": `${uiSize - fontSizes.default}px`,
+    "--reading-size": `${values.fontSize}px`,
+    "--reading-size-offset": `${values.fontSize - fontSizes.default}px`,
     "--reading-width": values.narrowReading ? "740px" : "1000px",
     "--code-font": fontFamilyCss(values.codeFontFamily, codeFontFallback),
     "--ui-font": fontFamilyCss(values.uiFontFamily, uiFontFallback),
     "--reading-font": readingFont,
-    "--list-title-font": values.uiFontFamily
-      ? fontFamilyCss(values.uiFontFamily, uiFontFallback)
-      : serifFallback,
   };
 }
 

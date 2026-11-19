@@ -29,7 +29,7 @@ Build app UI in `src/`. Keep `.openai/hosting.json`, `worker/index.js`, `scripts
 - Rust owns network and SQLite; React owns reading UI. Never fall back to an empty writable library after native read failures.
 - Serialize user-state writes, flush before quit, preserve existing article IDs on feed refresh, and keep refresh results behind an explicit load banner.
 - Back up the current library before transactional restore. Unsubscribe is archival: preserve cached articles and bookmarks.
-- Keep external pages outside the privileged WebView. No cloud, AI, feed background refresh, or image loading is implied.
+- Keep external pages outside the privileged WebView. Allow sanitized HTTP(S) image, audio and video URLs from article markup and feed attachments. Load images while reading, keep playback manual, and preserve article IDs across media changes. Keep third-party frames blocked.
 
 ## Modu productization, 2026-11-18
 
@@ -43,12 +43,19 @@ Build app UI in `src/`. Keep `.openai/hosting.json`, `worker/index.js`, `scripts
 - Native exit failure must offer retry, continue and export recovery. Cancelling an export must not exit. Failed loads must not initialize an existing incomplete database as an empty library.
 - Keep feed failures visible with retry; cancelling a read invalidates late results, while only the actual commit briefly blocks closing. Full backups include canonical committed content and latest unsaved reading facts.
 - Remember logical window sizes separately from screen position. Retain a single instance and native menus for existing settings and updates.
-- Keep a global settings surface with a visible gear and the macOS Settings menu and ⌘,. Put appearance, reading behavior, library maintenance, shortcuts and updates there. Keep the reader's Aa controls and the global settings on the same preferences and save queue.
+- Open global settings via the sidebar footer, the macOS Settings menu, or ⌘,. Put appearance, reading behavior, library maintenance, shortcuts and updates there. Keep the reader's Aa controls and the global settings on the same preferences and save queue.
 - Setting changes should patch fields. Preserve legacy defaults and keep update work alive while the settings dialog is closed or another section is selected.
 
 ## Interface and reading settings
 
 - On macOS, extend the active canvas color under the native traffic lights. Keep the titlebar draggable and place a Phosphor open-book icon immediately left of the 墨牍 wordmark.
 - Show publication time only on the current local day, and include the year for older articles from a different year. Name the active search scope and return keyboard focus to the search trigger on Escape.
-- Archive a subscription from its source menu, offer immediate undo, and keep cached articles and reading facts. Archive and restore update the source flag without consuming pending refresh results.
-- Follow Mozi's global Interface settings structure for display language, theme, accent and UI typography. Keep article typography, line width and reading behavior in Reading. Aa shares a single reading font selector with system serif, system sans serif, Tsanger JinKai 04, KingHwa OldSong and installed or manually entered families. Resolve named presets through local fonts and show a fallback hint when a preset is unavailable. Keep monospace code typography out of the settings UI.
+- A left swipe reveals Unsubscribe on the right of the same row. Keep the subscription name on the left and use one shared row background and outline. Keep the source menu as another entry point. Both actions archive the subscription, offer immediate undo, and keep cached articles and reading facts. Archive and restore update the source flag without consuming pending refresh results.
+- Follow Mozi's global Interface settings structure for display language, theme, accent and UI typography. Keep article typography, line width and reading behavior in Reading. Aa opens a compact panel that shares the reading font selector and text-size slider. The font choices include system default, system serif, Tsanger JinKai 04, KingHwa OldSong and installed or manually entered families. Resolve named presets through local fonts and show a fallback hint when a preset is unavailable. Keep monospace code typography out of the settings UI.
+- Keep the shared 10–20 px font-size range, 16 px default and 1 px step in `src/font-sizes.json`. Default both UI and reading to the system font, with independent font and size preferences. Read older backups and clamp values above the current limit.
+- Place the text-size slider last in both Interface and Reading settings. Start the Aa popover directly with the reading font field and keep its accessible name.
+- Keep the sidebar visible in the wide three-column layout and use a navigation drawer in narrow windows. Anchor the drawer controls at the same top-left coordinates and use an × to close it. Respect reduced motion. Keep the sidebar header, article categories and footer fixed. Scroll only the subscription list and hide its scrollbar. Use the same brand sizing and a subscription heading 2 px larger than feed names in both layouts. Place icon-only Add feed and Refresh feeds buttons to the right of the heading and use a separate Settings button in the footer.
+- Put Check for updates alongside the current update status and last successful check. Keep download and install actions with their release details.
+- Keep the three columns when adding list tools. Scope batch read to the displayed results and undo only that batch. Preserve the search query when changing scope, and index both the feed body and cached full text.
+- Keep subscription metadata and refresh status separate from queued article payloads. Preserve OPML folder paths and manual order. Additive import writes only incoming records, with full replacements using the existing backup and generation checks.
+- Offer opt-in automatic refresh while the app runs. Full text is requested explicitly and cached for the matching article URL. Keep the feed content and its media available alongside the original link.

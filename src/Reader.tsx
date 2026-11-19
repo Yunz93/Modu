@@ -25,6 +25,8 @@ type Props = {
   position: number;
   onSave: () => void;
   onRead: () => void;
+  onFullText?: () => void;
+  fetchingFullText: boolean;
   onFocus: () => void;
   onBack: () => void;
   onPreferences: (preferences: Partial<Preferences>) => void;
@@ -41,6 +43,8 @@ export function Reader({
   position,
   onSave,
   onRead,
+  onFullText,
+  fetchingFullText,
   onFocus,
   onBack,
   onPreferences,
@@ -48,23 +52,26 @@ export function Reader({
 }: Props) {
   const { t, locale } = useTranslation();
   const [appearanceOpen, setAppearanceOpen] = useState(false);
+  const [fullTextArticleId, setFullTextArticleId] = useState<string>();
+  const showFullText = !!article?.fullTextHtml && fullTextArticleId === article.id;
   const fonts = useFontChoices(appearanceOpen);
+  const appearancePanel = useRef<HTMLDivElement>(null);
   const scroll = useRef<HTMLDivElement>(null);
   const restoring = useRef(false);
   const initialPosition = useRef(position);
   initialPosition.current = position;
-  const html = useMemo(
-    () => cleanArticleHtml(article?.html ?? "", article?.url),
-    [article?.html, article?.url],
+  const markup = useMemo(
+    () => ({ __html: cleanArticleHtml((showFullText ? article?.fullTextHtml : article?.html) ?? "", article?.url ?? source?.url) }),
+    [showFullText, article?.fullTextHtml, article?.html, article?.url, source?.url],
   );
   useEffect(() => {
     restoring.current = true;
     const frame = requestAnimationFrame(() => {
-      if (scroll.current) scroll.current.scrollTop = initialPosition.current;
+      if (scroll.current) scroll.current.scrollTop = showFullText ? 0 : initialPosition.current;
       restoring.current = false;
     });
     return () => cancelAnimationFrame(frame);
-  }, [article?.id]);
+  }, [article?.id, showFullText]);
 
   return (
     <section className="reader" aria-label={t("文章阅读区")} id="main-content">
@@ -107,10 +114,17 @@ export function Reader({
             </Popover.Trigger>
             <Popover.Portal>
               <Popover.Content
+                ref={appearancePanel}
                 className="appearance-popover"
+                aria-label={t("阅读外观")}
                 align="end"
-                sideOffset={12}
+                sideOffset={8}
                 collisionPadding={12}
+                tabIndex={-1}
+                onOpenAutoFocus={(event) => {
+                  event.preventDefault();
+                  appearancePanel.current?.focus({ preventScroll: true });
+                }}
               >
                 <ReadingSettings
                   compact
@@ -157,24 +171,19 @@ export function Reader({
         className="reader-scroll"
         ref={scroll}
         onScroll={() => {
-          if (article && scroll.current && !restoring.current)
+          if (article && scroll.current && !showFullText && !restoring.current)
             onPosition(article.id, scroll.current.scrollTop);
         }}
       >
         {article ? (
           <article
             className={`article-document font-${preferences.font}`}
-            style={
-              {
-                "--reading-size": `${preferences.fontSize}px`,
-              } as React.CSSProperties
-            }
           >
             <header className="article-heading">
               <h1 lang={article.title.startsWith("A small") ? "en" : "zh-CN"}>
                 {article.title}
               </h1>
-              <p className="article-byline">
+              <div className="article-byline">
                 <span>{source?.name}</span>
                 {article.demo && (
                   <>
@@ -194,11 +203,24 @@ export function Reader({
                     </time>
                   </>
                 )}
-              </p>
+                {article.url && (onFullText || article.fullTextHtml) && (
+                  article.fullTextHtml
+                    ? <button
+                        className="full-text-action"
+                        onClick={() => setFullTextArticleId(showFullText ? undefined : article.id)}
+                      >{t(showFullText ? "返回订阅内容" : "查看已缓存全文")}</button>
+                    : <button
+                        className="full-text-action"
+                        disabled={fetchingFullText}
+                        onClick={onFullText}
+                      >{t(fetchingFullText ? "正在获取全文…" : "获取全文")}</button>
+                )}
+              </div>
             </header>
             <div
+              key={article.id}
               className="article-body"
-              dangerouslySetInnerHTML={{ __html: html }}
+              dangerouslySetInnerHTML={markup}
             />
             <footer className="article-footer">
               <span>{t("读到这里，留一点时间想一想。")}</span>

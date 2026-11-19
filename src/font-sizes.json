@@ -1,0 +1,8 @@
+{
+  "min": 10,
+  "max": 20,
+  "default": 16,
+  "step": 1,
+  "legacyUiMax": 24,
+  "legacyReadingMax": 36
+}

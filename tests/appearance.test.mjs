@@ -10,14 +10,37 @@ import {
   themePalettes,
   uiFontFallback,
 } from "../src/appearance.ts";
+import { createLibrary } from "../src/data.ts";
+import { isLibrary } from "../src/model.ts";
 
-const preferences = { fontSize: 23, font: "serif", theme: "paper" };
+const preferences = { fontSize: 16, font: "sans", theme: "paper" };
+
+test("font size bounds apply independently and survive a library round trip", () => {
+  for (const [uiFontSize, fontSize] of [[10, 20], [20, 10]]) {
+    const library = createLibrary();
+    library.preferences = normalizePreferences({ ...preferences, uiFontSize, fontSize });
+    const restored = JSON.parse(JSON.stringify(library));
+    assert.ok(isLibrary(restored));
+    const css = appearanceVariables(restored.preferences);
+    assert.equal(css["--ui-font-size"], `${uiFontSize}px`);
+    assert.equal(css["--reading-size"], `${fontSize}px`);
+  }
+  const library = createLibrary();
+  library.preferences.fontSize = 36;
+  library.preferences.uiFontSize = 24;
+  assert.ok(isLibrary(library));
+  assert.equal(normalizePreferences(library.preferences).fontSize, 20);
+  assert.equal(normalizePreferences(library.preferences).uiFontSize, 20);
+  library.preferences.fontSize = 37;
+  assert.equal(isLibrary(library), false);
+});
 
 test("legacy appearance settings gain optional fields without resetting existing choices", () => {
   const previous = { fontSize: 26, font: "sans", theme: "night" };
   const result = normalizePreferences(previous);
   assert.deepEqual(result, {
     ...previous,
+    fontSize: 20,
     locale: "zh-CN",
     accentColor: "",
     followSystemTheme: false,
@@ -30,6 +53,19 @@ test("legacy appearance settings gain optional fields without resetting existing
     readingFontFamily: "",
   });
   assert.deepEqual(normalizePreferences(result), result);
+});
+
+test("interface and reader start at 16 px with the same system font", () => {
+  const values = createLibrary().preferences;
+  const css = appearanceVariables(values);
+  assert.equal(css["--ui-font-size"], "16px");
+  assert.equal(css["--reading-size"], "16px");
+  assert.equal(css["--ui-font"], uiFontFallback);
+  assert.equal(css["--reading-font"], uiFontFallback);
+  assert.equal(
+    appearanceVariables({ ...values, uiFontFamily: "Avenir Next" })["--reading-font"],
+    uiFontFallback,
+  );
 });
 
 test("default accent and selection match the user-provided Mozi reference", () => {
@@ -141,7 +177,7 @@ test("named reading fonts use local family aliases and keep the system fallback"
     readingFontFamily: "TsangerJinKai02 W04",
   });
   assert.match(jinkai["--reading-font"], /"TsangerJinKai02"/);
-  assert.match(jinkai["--reading-font"], /"Songti SC"/);
+  assert.ok(jinkai["--reading-font"].endsWith(uiFontFallback));
   assert.match(jinkai["--ui-font"], /^"PingFang SC",/);
   const oldSong = appearanceVariables({
     ...preferences,

@@ -97,12 +97,52 @@ fn commit_feed(state: tauri::State<AppState>, feed: PreparedFeed) -> Result<Chan
     with_db(&state, |db| db.commit_feed(feed))
 }
 #[tauri::command]
+fn edit_source(
+    state: tauri::State<AppState>,
+    id: String,
+    name: String,
+    folder_path: Vec<String>,
+) -> Result<Source, String> {
+    with_db(&state, |db| db.edit_source(&id, name, folder_path))
+}
+#[tauri::command]
+async fn load_article_full_text(
+    state: tauri::State<'_, AppState>,
+    id: String,
+    expected_url: String,
+) -> Result<String, String> {
+    let (article, generation, feed_url) = with_db(&state, |db| {
+        let article = db.article(&id)?;
+        let source_url = db.source_url(&article.source_id)?;
+        Ok((article, db.generation()?, source_url))
+    })?;
+    if article.url.as_deref() != Some(expected_url.as_str()) {
+        return Err("文章已更新，请载入后再获取全文。".into());
+    }
+    if let Some(html) = article.full_text_html {
+        return Ok(html);
+    }
+    let url = article.url.ok_or("这篇文章没有原文地址。")?;
+    let html = feeds::fetch_full_text(&url, &feed_url).await?;
+    with_db(&state, |db| {
+        db.cache_full_text(&id, generation, &url, &html)
+    })?;
+    Ok(html)
+}
+#[tauri::command]
 fn import_library(
     state: tauri::State<AppState>,
     library: Library,
     replace: bool,
 ) -> Result<Loaded, String> {
     with_db(&state, |db| db.import(library, replace))
+}
+#[tauri::command]
+fn import_feed_file(
+    state: tauri::State<AppState>,
+    library: Library,
+) -> Result<ImportedContent, String> {
+    with_db(&state, |db| db.import_records(library, false))
 }
 #[tauri::command]
 fn frontend_ready(state: tauri::State<AppState>) {
@@ -260,7 +300,10 @@ pub fn run() {
             save_state,
             prepare_feed,
             commit_feed,
+            edit_source,
+            load_article_full_text,
             import_library,
+            import_feed_file,
             frontend_ready,
             finish_exit,
             open_external,

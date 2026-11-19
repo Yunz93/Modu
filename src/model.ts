@@ -1,3 +1,5 @@
+import { isFontSizeInRange, storedReadingSizeRange } from "./font-sizes.ts";
+
 export type Source = {
   id: string;
   name: string;
@@ -5,6 +7,9 @@ export type Source = {
   kind: "demo" | "imported" | "pending";
   archived?: boolean;
   lastError?: string;
+  lastSuccess?: string;
+  folder?: string;
+  folderPath?: string[];
 };
 export type Article = {
   id: string;
@@ -12,6 +17,7 @@ export type Article = {
   title: string;
   excerpt: string;
   html: string;
+  fullTextHtml?: string;
   date: string;
   url?: string;
   demo?: boolean;
@@ -31,6 +37,12 @@ export type Preferences = {
   followSystemTheme?: boolean;
   uiFontSize?: number;
   narrowReading?: boolean;
+  compactList?: boolean;
+  refreshOnLaunch?: boolean;
+  refreshInterval?: 0 | 15 | 30 | 60;
+  lastFeedRefresh?: { at: string; newCount: number; failed: number };
+  feedOrder?: string[];
+  sortFeedsByName?: boolean;
   markReadOnOpen?: boolean;
   codeFontFamily?: string;
   singleKeyShortcuts?: boolean;
@@ -72,30 +84,29 @@ export function filterArticles(
   sourceId: string | null,
   query: string,
   selectedId: string | null,
+  articleText?: (article: Article) => string,
 ) {
   const search = query.trim().toLocaleLowerCase();
+  const sources = new Map(library.sources.map((source) => [source.id, source]));
+  const read = new Set(library.read);
+  const saved = new Set(library.saved);
   return library.articles.filter((article) => {
     if (sourceId && article.sourceId !== sourceId) return false;
-    if (
-      view !== "saved" &&
-      library.sources.find((s) => s.id === article.sourceId)?.archived
-    )
-      return false;
-    if (view === "saved" && !library.saved.includes(article.id)) return false;
+    const source = sources.get(article.sourceId);
+    if (view !== "saved" && source?.archived) return false;
+    if (view === "saved" && !saved.has(article.id)) return false;
     if (
       view === "unread" &&
-      library.read.includes(article.id) &&
+      read.has(article.id) &&
       article.id !== selectedId
     )
       return false;
-    const source =
-      library.sources.find((source) => source.id === article.sourceId)?.name ??
-      "";
     return (
       !search ||
-      `${article.title} ${article.excerpt} ${source}`
+      `${article.title} ${article.excerpt} ${source?.name ?? ""}`
         .toLocaleLowerCase()
-        .includes(search)
+        .includes(search) ||
+      (articleText?.(article) ?? "").includes(search)
     );
   });
 }
@@ -127,7 +138,11 @@ export function mergeImport(
       (item) => item.id === article.id && item.sourceId === sourceId,
     );
     if (index < 0) nextArticles.push(normalized);
-    else nextArticles[index] = normalized;
+    else nextArticles[index] = {
+      ...normalized,
+      fullTextHtml: normalized.fullTextHtml ??
+        (nextArticles[index].url === normalized.url ? nextArticles[index].fullTextHtml : undefined),
+    };
   }
   return { ...library, sources: nextSources, articles: nextArticles };
 }
@@ -143,6 +158,9 @@ export function isLibrary(value: unknown): value is Library {
         typeof source.id === "string" &&
         typeof source.name === "string" &&
         typeof source.url === "string" &&
+        (source.folderPath === undefined ||
+          (Array.isArray(source.folderPath) && source.folderPath.length <= 32 &&
+            source.folderPath.every((part) => typeof part === "string"))) &&
         ["demo", "imported", "pending"].includes(source.kind),
     ) &&
     Array.isArray(data.articles) &&
@@ -152,6 +170,7 @@ export function isLibrary(value: unknown): value is Library {
         typeof article.sourceId === "string" &&
         typeof article.title === "string" &&
         typeof article.html === "string" &&
+        (article.fullTextHtml === undefined || typeof article.fullTextHtml === "string") &&
         typeof article.excerpt === "string" &&
         typeof article.date === "string" &&
         (article.date === "" || Number.isFinite(Date.parse(article.date))) &&
@@ -171,9 +190,7 @@ export function isLibrary(value: unknown): value is Library {
         position >= 0,
     ) &&
     !!data.preferences &&
-    Number.isFinite(data.preferences.fontSize) &&
-    data.preferences.fontSize >= 16 &&
-    data.preferences.fontSize <= 28 &&
+    isFontSizeInRange(data.preferences.fontSize, storedReadingSizeRange) &&
     ["serif", "sans"].includes(data.preferences.font) &&
     ["paper", "night"].includes(data.preferences.theme) &&
     (data.selectedId === null || typeof data.selectedId === "string")

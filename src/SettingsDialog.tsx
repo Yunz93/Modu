@@ -65,7 +65,9 @@ export function SettingsDialog({
   const id = useId();
   const fonts = useFontChoices(section !== null);
   const pane = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => pane.current?.scrollTo(0, 0), [section]);
+  useLayoutEffect(() => {
+    pane.current?.scrollTo(0, 0);
+  }, [section]);
   const active = sections.find(({ id }) => id === section);
   return (
     <Dialog.Root
@@ -130,35 +132,6 @@ export function SettingsDialog({
                   fonts={fonts}
                   onChange={onPreferences}
                 />
-                <label className="settings-row">
-                  <span>
-                    {t("正文行宽")}<small>{t("窄版在宽窗口中缩短每行文字。")}</small>
-                  </span>
-                  <select
-                    value={preferences.narrowReading ? "narrow" : "standard"}
-                    onChange={(event) =>
-                      onPreferences({
-                        narrowReading: event.target.value === "narrow",
-                      })
-                    }
-                  >
-                    <option value="standard">{t("标准")}</option>
-                    <option value="narrow">{t("窄版")}</option>
-                  </select>
-                </label>
-                <label className="settings-row">
-                  <span>
-                    {t("打开文章时标为已读")}
-                    <small>{t("关闭后可在正文底部手动标为已读。")}</small>
-                  </span>
-                  <input
-                    type="checkbox"
-                    checked={preferences.markReadOnOpen !== false}
-                    onChange={(event) =>
-                      onPreferences({ markReadOnOpen: event.target.checked })
-                    }
-                  />
-                </label>
               </div>
               {section === "library" && (
                 <>
@@ -169,6 +142,40 @@ export function SettingsDialog({
                         t("保存在当前浏览器，可通过完整备份迁移到桌面版。")}
                     </p>
                   </div>
+                  {dataPath && (
+                    <>
+                      <label className="settings-row">
+                        <span>{t("启动时刷新订阅")}</span>
+                        <input
+                          type="checkbox"
+                          checked={preferences.refreshOnLaunch === true}
+                          onChange={(event) => onPreferences({ refreshOnLaunch: event.target.checked })}
+                        />
+                      </label>
+                      <label className="settings-row">
+                        <span>{t("定时刷新订阅")}<small>{t("仅在墨牍运行时刷新。")}</small></span>
+                        <select
+                          value={preferences.refreshInterval ?? 0}
+                          onChange={(event) => onPreferences({ refreshInterval: Number(event.target.value) as Preferences["refreshInterval"] })}
+                        >
+                          <option value={0}>{t("关闭")}</option>
+                          {[15, 30, 60].map((minutes) => (
+                            <option key={minutes} value={minutes}>{t("每 {0} 分钟", [minutes])}</option>
+                          ))}
+                        </select>
+                      </label>
+                    </>
+                  )}
+                  <label className="settings-row">
+                    <span>{t("订阅排序")}</span>
+                    <select
+                      value={preferences.sortFeedsByName ? "name" : "manual"}
+                      onChange={(event) => onPreferences({ sortFeedsByName: event.target.value === "name" })}
+                    >
+                      <option value="manual">{t("手动排序")}</option>
+                      <option value="name">{t("按名称排序")}</option>
+                    </select>
+                  </label>
                   {storageError && (
                     <p className="form-error" role="alert">
                       {t(storageError)}

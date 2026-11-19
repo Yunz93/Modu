@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:media="http://search.yahoo.com/mrss/">
+  <channel>
+    <title>媒体验收</title>
+    <link>http://127.0.0.1:15324/feed.rss</link>
+    <description>Media fixtures</description>
+    <item>
+      <title>打开图片与播放器</title>
+      <link>http://127.0.0.1:15324/articles/post.html</link>
+      <guid isPermaLink="false">media-content</guid>
+      <content:encoded><![CDATA[
+        <p>正文中的相对图片与直链播放器。</p>
+        <img src="cover.png" width="320" alt="媒体测试图片" onerror="console.log('blocked')">
+        <img src="data:image/png;base64,AA==" data-src="../cover.png" alt="延迟图片">
+        <video autoplay poster="/cover.png"><source src="/clip.mp4" type="video/mp4"></video>
+        <audio src="file:///private/etc/hosts"></audio>
+        <iframe src="https://example.com/embed"></iframe>
+        <script>console.log('blocked')</script>
+      ]]></content:encoded>
+      <enclosure url="/episode.wav?quality=high&amp;fixture=1" type="audio/wav" length="0"/>
+      <media:content url="/articles/cover.png" type="image/png"/>
+    </item>
+    <item>
+      <title>兼容旧文章标识</title>
+      <description><![CDATA[<p>旧文章正文</p><audio src="/episode.wav" controls></audio>]]></description>
+    </item>
+  </channel>
+</rss>

@@ -2,8 +2,11 @@ import { LocaleContext } from "./locale-context";
 import { translate } from "./locale";
 import {
   useCallback,
+  useDeferredValue,
   useEffect,
+  useEffectEvent,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -20,14 +23,13 @@ import {
   ListBulletsIcon,
   MagnifyingGlassIcon,
   PlusIcon,
-  RssSimpleIcon,
   SidebarSimpleIcon,
   StackIcon,
   XIcon,
 } from "@phosphor-icons/react";
 import { createLibrary, extraArticle, extraSource } from "./data";
 import { createArticleDateFormatter } from "./article-date";
-import { downloadFile, exportOpml, parseFeedFile } from "./feed-import";
+import { cachedArticleText, downloadFile, exportOpml, parseFeedFile } from "./feed-import";
 import {
   filterArticles,
   httpUrl,
@@ -43,9 +45,12 @@ import { useUpdateCenter } from "./UpdateCenter";
 import { SettingsDialog, type SettingsSection } from "./SettingsDialog";
 import { Reader } from "./Reader";
 import { StartupScreen } from "./StartupScreen";
-import { queueUpdates, replaceContent } from "./feed-updates";
+import { discardImportedUpdates, queueUpdates } from "./feed-updates";
 import { CloseRecoveryDialog } from "./CloseRecoveryDialog";
 import { SubscriptionDialog, type Submission } from "./SubscriptionDialog";
+import { SubscriptionList } from "./SubscriptionList";
+import { SourceEditDialog } from "./SourceEditDialog";
+import { orderSources, reorderedSourceIds } from "./source-layout";
 import {
   desktop,
   native,
@@ -60,8 +65,8 @@ import {
   applyAppearance,
   effectiveAppearance,
   normalizePreferences,
-  uiFontSizes,
 } from "./appearance";
+import { fontSizes } from "./font-sizes";
 
 function loadLibrary(): { library: Library; error: string } {
   try {
@@ -153,6 +158,7 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
     useState<SettingsSection | null>(null);
   const settingsOrigin = useRef<HTMLElement | null>(null);
   const navTrigger = useRef<HTMLButtonElement>(null);
+  const settingsTrigger = useRef<HTMLButtonElement>(null);
   const [systemDark, setSystemDark] = useState(
     () => matchMedia("(prefers-color-scheme: dark)").matches,
   );
@@ -191,7 +197,13 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
   const [view, setView] = useState<View>("unread");
   const [sourceId, setSourceId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const deferredQuery = useDeferredValue(query);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [searchEverywhere, setSearchEverywhere] = useState(false);
+  const [batchUndo, setBatchUndo] = useState<string[]>([]);
+  const [sourceToEdit, setSourceToEdit] = useState<Source | null>(null);
+  const [fetchingFullText, setFetchingFullText] = useState<Set<string>>(new Set());
+  const restoredGeneration = useRef(0);
   const searchTrigger = useRef<HTMLButtonElement>(null);
   const [focus, setFocus] = useState(false);
   const [mobileReader, setMobileReader] = useState(false);
@@ -336,6 +348,7 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
   const closeSearch = () => {
     setSearchOpen(false);
     setQuery("");
+    setSearchEverywhere(false);
     searchTrigger.current?.focus();
   };
 
@@ -351,28 +364,64 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
     (source) => source.id === article?.sourceId,
   );
   const activeSource = library.sources.find((source) => source.id === sourceId);
+  const wholeLibrary = searchOpen && searchEverywhere;
   const visibleUpdates = updates.filter((change) =>
     !library.sources.find((source) => source.id === change.source.id)?.archived,
   );
-  const listSearchLabel = activeSource
+  const listSearchLabel = wholeLibrary ? t("搜索全部文章") : activeSource
     ? t("搜索此订阅")
     : view === "saved" ? t("搜索收藏") : view === "unread" ? t("搜索未读文章") : t("搜索全部文章");
   const formatArticleDate = createArticleDateFormatter(locale);
-  const articles = filterArticles(
-    library,
-    view,
-    sourceId,
-    query,
-    library.selectedId,
+  const articles = useMemo(
+    () => filterArticles(
+      library, wholeLibrary ? "all" : view, wholeLibrary ? null : sourceId,
+      deferredQuery, library.selectedId, cachedArticleText,
+    ),
+    [library, wholeLibrary, view, sourceId, deferredQuery],
   );
-  const unreadCount = library.articles.filter(
-    (article) =>
-      !library.read.includes(article.id) &&
-      !library.sources.find((s) => s.id === article.sourceId)?.archived,
-  ).length;
+  const readIds = useMemo(() => new Set(library.read), [library.read]);
+  const savedIds = useMemo(() => new Set(library.saved), [library.saved]);
+  const sourcesById = useMemo(
+    () => new Map(library.sources.map((source) => [source.id, source])),
+    [library.sources],
+  );
+  const orderedSources = useMemo(
+    () => orderSources(library.sources, library.preferences, locale),
+    [library.sources, library.preferences.feedOrder, library.preferences.sortFeedsByName, locale],
+  );
+  const previousSourceOrder = activeSource && reorderedSourceIds(orderedSources, activeSource.id, -1);
+  const nextSourceOrder = activeSource && reorderedSourceIds(orderedSources, activeSource.id, 1);
+  const unreadBySource = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const item of library.articles) {
+      if (readIds.has(item.id) || sourcesById.get(item.sourceId)?.archived) continue;
+      counts.set(item.sourceId, (counts.get(item.sourceId) ?? 0) + 1);
+    }
+    return counts;
+  }, [library.articles, readIds, sourcesById]);
+  const unreadCount = Array.from(unreadBySource.values()).reduce((total, count) => total + count, 0);
+  const readBatch = useMemo(
+    () => articles.filter((item) => !readIds.has(item.id)).map((item) => item.id),
+    [articles, readIds],
+  );
   const heading = activeSource?.name ?? t(viewLabels[view]);
 
+  function markBatchRead() {
+    if (!readBatch.length || deferredQuery !== query) return;
+    setBatchUndo(readBatch);
+    setLibrary((current) => ({ ...current, read: [...new Set([...current.read, ...readBatch])] }));
+  }
+
+  function undoBatchRead() {
+    const batch = new Set(batchUndo);
+    setLibrary((current) => ({ ...current, read: current.read.filter((id) => !batch.has(id)) }));
+    setBatchUndo([]);
+    sourceMenuTrigger.current?.focus();
+  }
+
   const openArticle = useCallback((id: string) => {
+    if (libraryRef.current.preferences.markReadOnOpen !== false)
+      setBatchUndo((current) => current.includes(id) ? current.filter((item) => item !== id) : current);
     setLibrary((current) => ({
       ...current,
       selectedId: id,
@@ -384,11 +433,10 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
     setMobileReader(true);
   }, []);
   const navigate = (nextView: View, nextSource: string | null = null) => {
-    const first = filterArticles(library, nextView, nextSource, "", null)[0];
+    const first = filterArticles(library, nextView, nextSource, query, null, cachedArticleText)[0];
     setView(nextView);
     setSourceId(nextSource);
-    setQuery("");
-    setSearchOpen(false);
+    setSearchEverywhere(false);
     setNavOpen(false);
     setMobileReader(false);
     setLibrary((current) => ({ ...current, selectedId: first?.id ?? null }));
@@ -407,6 +455,7 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
   }, [library.selectedId, library.saved, notify, t]);
   const toggleRead = () => {
     if (!article) return;
+    setBatchUndo((current) => current.includes(article.id) ? current.filter((id) => id !== article.id) : current);
     const read = library.read.includes(article.id);
     setLibrary((current) => ({
       ...current,
@@ -416,8 +465,35 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
     }));
     notify(read ? t("已标为未读") : t("已标为已读"));
   };
+  const fetchFullText = async () => {
+    if (!desktop || !article?.url || fetchingFullText.has(article.id) || installLocked || restorePending.current) return;
+    const { id, url } = article;
+    const generation = restoredGeneration.current;
+    setFetchingFullText((current) => new Set([...current, id]));
+    try {
+      const html = await native.fullText(id, url);
+      if (generation !== restoredGeneration.current) return;
+      setLibrary((current) => ({
+        ...current,
+        articles: current.articles.map((item) =>
+          item.id === id && item.url === url ? { ...item, fullTextHtml: html } : item,
+        ),
+      }));
+    } catch {
+      if (generation === restoredGeneration.current)
+        notify(t("无法获取全文，仍可阅读订阅内容或打开原文。"));
+    } finally {
+      setFetchingFullText((current) => {
+        const next = new Set(current);
+        next.delete(id);
+        return next;
+      });
+    }
+  };
   const openAdd = () => {
-    if (!sourceMutation.current) setAddOpen(true);
+    if (sourceMutation.current) return;
+    setNavOpen(false);
+    setAddOpen(true);
   };
 
   useEffect(() => {
@@ -431,10 +507,11 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
         (event.metaKey || event.ctrlKey) && ["+", "=", "-"].includes(event.key)
       ) {
         event.preventDefault();
-        const delta = event.key === "-" ? -1 : 1;
+        const delta = event.key === "-" ? -fontSizes.step : fontSizes.step;
         setLibrary((current) => {
-          const size = current.preferences.uiFontSize ?? uiFontSizes.default;
-          const uiFontSize = Math.min(uiFontSizes.max, Math.max(uiFontSizes.min, size + delta));
+          const { min, max, default: defaultSize } = fontSizes;
+          const size = current.preferences.uiFontSize ?? defaultSize;
+          const uiFontSize = Math.min(max, Math.max(min, size + delta));
           return size === uiFontSize ? current : {
             ...current,
             preferences: { ...current.preferences, uiFontSize },
@@ -502,16 +579,7 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
     setLibrary((current) => {
       let next = current;
       for (const change of changes)
-        next = {
-          ...mergeImport(next, [change.source], change.articles),
-          sources: next.sources.some((s) => s.id === change.source.id)
-            ? next.sources.map((s) =>
-                s.id === change.source.id
-                  ? { ...change.source, archived: s.archived }
-                  : s,
-              )
-            : [...next.sources, change.source],
-        };
+        next = mergeImport(next, [change.source], change.articles);
       return {
         ...next,
         articles: [...next.articles].sort(
@@ -521,12 +589,19 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
     });
     if (consumePending) setUpdates((current) => current.filter((change) => !changes.includes(change)));
   };
-  const refresh = async (onlySource?: string) => {
+  const refresh = async (onlySource?: string, automatic = false) => {
     if (!desktop) {
       notify(t("浏览器原型支持文件导入；桌面版可直接联网订阅。"));
       return;
     }
-    if (refreshPending.current || sourceMutation.current) return;
+    if (refreshPending.current || sourceMutation.current || restorePending.current || installLocked || addOpen) return;
+    const targets = libraryRef.current.sources.filter(
+      (item) => item.kind !== "demo" && !item.archived && (!onlySource || item.id === onlySource),
+    );
+    if (!targets.length) {
+      if (!automatic) notify(t("还没有可刷新的订阅。"));
+      return;
+    }
     refreshPending.current = true;
     const controller = new AbortController();
     refreshAbort.current = controller;
@@ -534,12 +609,7 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
     const epoch = operation.current;
     let count = 0;
     const failures: string[] = [];
-    for (const source of libraryRef.current.sources.filter(
-      (s) =>
-        s.kind !== "demo" &&
-        !s.archived &&
-        (!onlySource || s.id === onlySource),
-    )) {
+    for (const source of targets) {
       if (libraryRef.current.sources.find((item) => item.id === source.id)?.archived) continue;
       try {
         const prepared = await native.prepare(
@@ -549,14 +619,19 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
         );
         if (epoch !== operation.current) break;
         if (libraryRef.current.sources.find((item) => item.id === source.id)?.archived) continue;
-        const change = await native.commit(prepared);
+        const change = await native.commit({
+          ...prepared,
+          source: { ...prepared.source, id: source.id, url: source.url },
+        });
         // A committed feed remains available even if the next request is cancelled.
         if (epoch !== operation.current) break;
         count += change.newCount;
         setLibrary((current) => ({
           ...current,
           sources: current.sources.map((s) =>
-            s.id === change.source.id ? { ...s, lastError: undefined } : s,
+            s.id === change.source.id
+              ? { ...s, kind: change.source.kind, lastError: undefined, lastSuccess: change.source.lastSuccess }
+              : s,
           ),
         }));
         setUpdates((current) => queueUpdates(current, [change]));
@@ -586,19 +661,34 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
       }
     }
     if (epoch === operation.current) {
-      notify(
-        failures.length
-          ? failures.join("；")
-          : count
-            ? t("已获取 {0} 篇新文章", [count])
-            : t("订阅已是最新"),
-      );
-    }
-    if (epoch === operation.current) {
+      if (!onlySource)
+        patchPreferences({
+          lastFeedRefresh: {
+            at: new Date().toISOString(),
+            newCount: count,
+            failed: failures.length,
+          },
+        });
+      if (!automatic)
+        notify(
+          failures.length
+            ? failures.join("；")
+            : count ? t("已获取 {0} 篇新文章", [count]) : t("订阅已是最新"),
+        );
       refreshPending.current = false;
       setRefreshing(false);
     }
   };
+  const scheduledRefresh = useEffectEvent(() => { void refresh(undefined, true); });
+  useEffect(() => {
+    if (desktop && libraryRef.current.preferences.refreshOnLaunch === true) scheduledRefresh();
+  }, []);
+  const refreshInterval = library.preferences.refreshInterval;
+  useEffect(() => {
+    if (!desktop || (refreshInterval !== 15 && refreshInterval !== 30 && refreshInterval !== 60)) return;
+    const timer = setInterval(() => scheduledRefresh(), refreshInterval * 60_000);
+    return () => clearInterval(timer);
+  }, [refreshInterval]);
   const stopRefresh = () => {
     operation.current++;
     refreshAbort.current?.abort();
@@ -609,13 +699,16 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
     stopRefresh();
     notify(t("已停止刷新，已保存的缓存仍保留。"));
   };
-  const setSourceArchived = async (source: Source, archived: boolean) => {
+  const setSourceArchived = async (source: Source, archived: boolean, fromDrawer = false) => {
     if (sourceMutation.current || restorePending.current || installLocked || addOpen) return;
+    const swipeAction = document.activeElement?.closest(".source-unsubscribe");
     sourceMutation.current = true;
     setSourceBusy(true);
     try {
-      await nativeSave?.flush();
-      await native.setSourceArchived(source.id, archived);
+      if (desktop) {
+        await nativeSave?.flush();
+        await native.setSourceArchived(source.id, archived);
+      }
       setLibrary((current) => ({
         ...current,
         sources: current.sources.map((item) =>
@@ -624,9 +717,12 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
       }));
       if (archived) {
         setSourceId((current) => current === source.id ? null : current);
-        focusUndo.current = sourceId === source.id && (
-          document.activeElement === sourceMenuTrigger.current ||
-          document.activeElement === document.body
+        if (fromDrawer) setNavOpen(false);
+        const focused = document.activeElement;
+        focusUndo.current = !fromDrawer && (
+          (swipeAction && (focused === swipeAction || focused === document.body)) ||
+          (sourceId === source.id &&
+            (focused === sourceMenuTrigger.current || focused === document.body))
         );
         setArchivedNotice(source);
       } else {
@@ -636,6 +732,26 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
       }
     } catch (reason) {
       notify(String(reason));
+    } finally {
+      sourceMutation.current = false;
+      setSourceBusy(false);
+    }
+  };
+  const editSource = async (source: Source, name: string, folderPath: string[]) => {
+    if (sourceMutation.current || restorePending.current || installLocked)
+      throw new Error(t("阅读库正在忙，请稍后重试。"));
+    sourceMutation.current = true;
+    setSourceBusy(true);
+    try {
+      const updated = desktop
+        ? await native.editSource(source.id, name, folderPath)
+        : { ...source, name, folder: "", folderPath };
+      setLibrary((current) => ({
+        ...current,
+        sources: current.sources.map((item) => item.id === source.id
+          ? { ...item, name: updated.name, folder: updated.folder, folderPath: updated.folderPath }
+          : item),
+      }));
     } finally {
       sourceMutation.current = false;
       setSourceBusy(false);
@@ -695,14 +811,23 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
       const imported = parseFeedFile(contents);
       if (desktop) {
         await nativeSave?.flush();
+        const current = libraryRef.current;
+        const urls = new Set(imported.sources.map((source) => source.url));
         const importedLibrary = mergeImport(
-          libraryRef.current,
+          {
+            ...current,
+            sources: current.sources.filter((source) => urls.has(source.url)),
+            articles: [],
+            read: [], saved: [], positions: {}, selectedId: null,
+          },
           imported.sources,
           imported.articles,
         );
         if (!submission.beginCommit()) return "";
-        const result = await native.import(importedLibrary, false);
-        setLibrary((current) => replaceContent(current, result.library));
+        const result = await native.importFeedFile(importedLibrary);
+        const visible = libraryRef.current.articles;
+        setUpdates((pending) => discardImportedUpdates(pending, result.articles, visible));
+        setLibrary((current) => mergeImport(current, result.sources, result.articles));
       } else if (submission.beginCommit())
         setLibrary((current) => ({
           ...mergeImport(current, imported.sources, imported.articles),
@@ -755,27 +880,31 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
     preferences: library.preferences,
     onPreferences: patchPreferences,
     onAvailable: setNewVersion,
-    libraryBusy: refreshing || addOpen || !!restore || sourceBusy,
+    libraryBusy: refreshing || addOpen || !!restore || sourceBusy || fetchingFullText.size > 0,
     onLock: (locked) => {
       if (locked) operation.current++;
       setInstallLocked(locked);
     },
     save: flushReadingState,
   });
-  const sidebar = (
+  const refreshLabel = t(refreshing ? "停止刷新" : "刷新订阅");
+  const lastRefresh = library.preferences.lastFeedRefresh;
+  const refreshSummary = lastRefresh &&
+    typeof lastRefresh.at === "string" &&
+    Number.isFinite(Date.parse(lastRefresh.at)) &&
+    Number.isSafeInteger(lastRefresh.newCount) &&
+    Number.isSafeInteger(lastRefresh.failed)
+    ? t("{0} · 新增 {1} · 失败 {2}", [
+        new Date(lastRefresh.at).toLocaleString(locale), lastRefresh.newCount, lastRefresh.failed,
+      ])
+    : "";
+  const renderSidebar = (drawer = false) => (
     <aside className="sidebar" aria-label={t("阅读库导航")}>
       <header className="brand-header">
         <span className="wordmark">
-          <BookOpenIcon size={22} aria-hidden="true" />
+          <BookOpenIcon size={28} aria-hidden="true" />
           {t("墨牍")}
         </span>
-        <button
-          className="icon-button close-nav"
-          aria-label={t("关闭导航")}
-          onClick={() => setNavOpen(false)}
-        >
-          <XIcon size={20} />
-        </button>
       </header>
       <nav className="primary-nav" aria-label={t("文章分类")}>
         {navigation.map(([key, Icon]) => (
@@ -794,40 +923,48 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
         ))}
       </nav>
       <section className="sources-section">
-        <h2>{t("订阅")}</h2>
-        <nav aria-label={t("订阅来源")}>
-          {library.sources
-            .filter((s) => !s.archived)
-            .map((item) => (
-              <button
-                key={item.id}
-                className={`nav-item source-item ${sourceId === item.id ? "source-active" : ""}`}
-                aria-current={sourceId === item.id ? "page" : undefined}
-                onClick={() => navigate("all", item.id)}
-              >
-                <RssSimpleIcon size={23} />
-                <span>{item.name}</span>
-                {item.kind === "pending" && (
-                  <span
-                    className="pending-source"
-                    title={t("订阅地址已保存，点击刷新获取文章")}
-                  >
-                    {t("待更新")}
-                  </span>
-                )}
-              </button>
-            ))}
-        </nav>
+        <div className="subscription-heading">
+          <h2>{t("订阅")}</h2>
+          <div className="subscription-tools">
+            <button
+              className="icon-button"
+              aria-label={t("添加订阅")}
+              title={t("添加订阅")}
+              disabled={sourceBusy}
+              onClick={openAdd}
+            >
+              <PlusIcon size={19} aria-hidden="true" />
+            </button>
+            <button
+              className="icon-button"
+              aria-label={refreshLabel}
+              title={refreshLabel}
+              disabled={sourceBusy && !refreshing}
+              onClick={() => refreshing ? cancelRefresh() : void refresh()}
+            >
+              {refreshing ? (
+                <XIcon size={19} aria-hidden="true" />
+              ) : (
+                <ArrowClockwiseIcon size={19} aria-hidden="true" />
+              )}
+            </button>
+          </div>
+        </div>
+        {desktop && (refreshing || refreshSummary) && (
+          <p className="subscription-refresh-summary" role="status">
+            {refreshing ? t("正在刷新订阅…") : refreshSummary}
+          </p>
+        )}
+        <SubscriptionList
+          sources={orderedSources}
+          unreadBySource={unreadBySource}
+          selectedId={sourceId}
+          busy={sourceBusy}
+          onSelect={(id) => navigate("all", id)}
+          onUnsubscribe={(source) => void setSourceArchived(source, true, drawer)}
+        />
       </section>
       <div className="sidebar-bottom">
-        <button
-          className="primary-button add-source"
-          disabled={sourceBusy}
-          onClick={openAdd}
-        >
-          <PlusIcon size={23} />
-          {t("添加订阅")}
-        </button>
         {desktop && newVersion && (
           <button
             className="update-available quiet-button"
@@ -836,39 +973,29 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
             {t("墨牍 {0} 可用", [newVersion])}
           </button>
         )}
-        {refreshing && (
-          <button className="quiet-button" onClick={cancelRefresh}>
-            {t("停止刷新")}
-          </button>
-        )}
-        <div className="library-status">
-          <button
-            className="quiet-button refresh-button"
-            aria-label={t("检查订阅更新")}
-            onClick={() => void refresh()}
-            disabled={refreshing || sourceBusy}
-          >
-            <ArrowClockwiseIcon size={21} />
-            <span>
-              {storageError
-                ? t("保存出现问题")
-                : refreshing
-                  ? t("正在刷新…")
-                  : t("刷新订阅")}
-            </span>
-          </button>
-          <button
-            className="icon-button more-button"
-            aria-label={t("设置")}
-            title={t("设置 · ⌘,")}
-            onClick={(event) => openSettings("appearance", event.currentTarget)}
-          >
-            <GearSixIcon size={22} />
-          </button>
-        </div>
+        <button
+          className="quiet-button sidebar-settings"
+          ref={drawer ? undefined : settingsTrigger}
+          title={t("设置 · ⌘,")}
+          onClick={(event) => {
+            openSettings(
+              "appearance",
+              drawer ? navTrigger.current ?? undefined : event.currentTarget,
+            );
+          }}
+        >
+          <GearSixIcon size={20} aria-hidden="true" />
+          {t("设置")}
+        </button>
         {storageError && (
           <p className="storage-error" role="alert">
-            {t(storageError)}
+            <span className="sr-only">{t(storageError)}</span>
+            <button
+              className="quiet-button"
+              onClick={(event) => openSettings("library", event.currentTarget)}
+            >
+              {t("保存出现问题")}
+            </button>
           </p>
         )}
       </div>
@@ -877,35 +1004,45 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
 
   const content = (
     <div
-      className={`app-shell ${focus ? "is-focused" : ""} ${mobileReader ? "show-reader" : ""} ${navOpen ? "nav-is-open" : ""}`}
+      className={`app-shell ${focus ? "is-focused" : ""} ${mobileReader ? "show-reader" : ""}`}
     >
       <a className="skip-link" href="#main-content">
         {t("跳到正文")}
       </a>
-      {sidebar}
+      {renderSidebar()}
       <Dialog.Root open={navOpen} onOpenChange={setNavOpen}>
+        <Dialog.Trigger asChild>
+          <button
+            className="icon-button sidebar-toggle open-nav"
+            ref={navTrigger}
+            aria-label={t("打开导航")}
+          >
+            <SidebarSimpleIcon size={23} aria-hidden="true" />
+          </button>
+        </Dialog.Trigger>
         <Dialog.Portal>
           <Dialog.Overlay className="nav-backdrop" />
           <Dialog.Content
             className="sidebar-drawer"
             aria-describedby={undefined}
+            onCloseAutoFocus={(event) => {
+              if (document.querySelector(".settings-dialog, .subscription-dialog"))
+                event.preventDefault();
+            }}
           >
             <Dialog.Title className="sr-only">{t("阅读库导航")}</Dialog.Title>
-            {sidebar}
+            <Dialog.Close asChild>
+              <button className="icon-button sidebar-toggle close-nav" aria-label={t("关闭导航")}>
+                <XIcon size={20} aria-hidden="true" />
+              </button>
+            </Dialog.Close>
+            {renderSidebar(true)}
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
       <section className="article-list" aria-label={t("文章列表")}>
         <header className="list-header">
           <div className="list-title-row">
-            <button
-              className="icon-button open-nav"
-              ref={navTrigger}
-              aria-label={t("打开导航")}
-              onClick={() => setNavOpen(true)}
-            >
-              <SidebarSimpleIcon size={24} />
-            </button>
             <h1>{heading}</h1>
             <button
               className={`icon-button search-toggle ${searchOpen ? "search-active" : ""}`}
@@ -920,13 +1057,13 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
             >
               <MagnifyingGlassIcon size={24} />
             </button>
-            {desktop && activeSource && (
+            {(
               <Popover.Root>
                 <Popover.Trigger asChild>
                   <button
                     className="icon-button"
-                    aria-label={t("订阅操作")}
-                    title={t("订阅操作")}
+                    aria-label={activeSource ? t("订阅操作") : t("文章列表选项")}
+                    title={activeSource ? t("订阅操作") : t("文章列表选项")}
                     ref={sourceMenuTrigger}
                     aria-disabled={sourceBusy}
                     onClick={(event) => {
@@ -938,12 +1075,43 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
                 </Popover.Trigger>
                 <Popover.Portal>
                   <Popover.Content
-                    className="source-actions"
-                    aria-label={t("订阅操作")}
+                    className="source-actions list-operations"
+                    aria-label={activeSource ? t("订阅操作") : t("文章列表选项")}
                     align="end"
                     sideOffset={6}
                   >
                     <Popover.Close asChild>
+                      <button className="quiet-button" disabled={!readBatch.length || deferredQuery !== query} onClick={markBatchRead}>
+                        {t(deferredQuery.trim() ? "搜索结果标为已读（{0} 篇）" : "全部标为已读（{0} 篇）", [readBatch.length])}
+                      </button>
+                    </Popover.Close>
+                    <button
+                      className="quiet-button"
+                      aria-pressed={library.preferences.compactList === true}
+                      onClick={() => patchPreferences({ compactList: !library.preferences.compactList })}
+                    >
+                      {t("紧凑列表")}
+                    </button>
+                    {activeSource && (
+                      <>
+                        <Popover.Close asChild>
+                          <button className="quiet-button" onClick={() => setSourceToEdit(activeSource)}>
+                            {t("编辑订阅")}
+                          </button>
+                        </Popover.Close>
+                        <button
+                          className="quiet-button"
+                          disabled={!previousSourceOrder}
+                          onClick={() => patchPreferences({ feedOrder: previousSourceOrder, sortFeedsByName: false })}
+                        >{t("上移订阅")}</button>
+                        <button
+                          className="quiet-button"
+                          disabled={!nextSourceOrder}
+                          onClick={() => patchPreferences({ feedOrder: nextSourceOrder, sortFeedsByName: false })}
+                        >{t("下移订阅")}</button>
+                      </>
+                    )}
+                    {activeSource && <Popover.Close asChild>
                       <button
                         className="quiet-button"
                         onClick={() => void setSourceArchived(activeSource, true)}
@@ -951,14 +1119,16 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
                         <ArchiveIcon size={17} aria-hidden="true" />
                         {t("取消订阅")}
                       </button>
-                    </Popover.Close>
+                    </Popover.Close>}
                   </Popover.Content>
                 </Popover.Portal>
               </Popover.Root>
             )}
           </div>
           <p className="list-subtitle">
-            {sourceId
+            {wholeLibrary
+              ? t("全库 · {0} 篇文章", [articles.length])
+              : sourceId
               ? t("{0} 篇文章{1}", [articles.length, activeSource?.kind === "demo" ? t(" · 示例订阅") : ""])
               : view === "saved"
                 ? t("{0} 篇值得再读的文章", [articles.length])
@@ -968,7 +1138,7 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
                     weekday: "long",
                   }).format(new Date())}
           </p>
-          {searchOpen && (
+          {searchOpen && (<>
             <div
               className="search-field"
               onKeyDown={(event) => {
@@ -997,7 +1167,17 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
                 <XIcon size={15} />
               </button>
             </div>
-          )}
+            {(sourceId || view !== "all") && (
+              <div className="search-scope" role="group" aria-label={t("搜索范围")}>
+                <button aria-pressed={!searchEverywhere} onClick={() => setSearchEverywhere(false)}>
+                  {t(sourceId ? "当前订阅" : "当前列表")}
+                </button>
+                <button aria-pressed={searchEverywhere} onClick={() => setSearchEverywhere(true)}>
+                  {t("全部文章")}
+                </button>
+              </div>
+            )}
+          </>)}
         </header>
         {archivedNotice && (
           <div className="source-notice">
@@ -1019,6 +1199,15 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
                 setArchivedNotice(null);
               }}
             >
+              <XIcon size={17} />
+            </button>
+          </div>
+        )}
+        {batchUndo.length > 0 && (
+          <div className="source-notice">
+            <span role="status">{t("已将 {0} 篇文章标为已读", [batchUndo.length])}</span>
+            <button className="quiet-button" onClick={undoBatchRead}>{t("撤销")}</button>
+            <button className="icon-button" aria-label={t("关闭提示")} onClick={() => setBatchUndo([])}>
               <XIcon size={17} />
             </button>
           </div>
@@ -1064,13 +1253,11 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
                 ))}
             </section>
           )}
-        <div className="article-list-scroll">
+        <div className={`article-list-scroll ${library.preferences.compactList ? "compact-list" : ""}`}>
           {articles.length ? (
             articles.map((item) => {
-              const itemSource = library.sources.find(
-                (source) => source.id === item.sourceId,
-              );
-              const unread = !library.read.includes(item.id);
+              const itemSource = sourcesById.get(item.sourceId);
+              const unread = !readIds.has(item.id);
               const publication = formatArticleDate(item.date);
               return (
                 <button
@@ -1099,7 +1286,7 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
                       {publication
                         ? <time dateTime={publication.dateTime}>{publication.label}</time>
                         : <span>{t("日期未知")}</span>}
-                      {library.saved.includes(item.id) && (
+                      {savedIds.has(item.id) && (
                         <BookmarkSimpleIcon
                           className="row-bookmark"
                           size={14}
@@ -1139,12 +1326,17 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
                     ? t("阅读时点击书签，值得重读的文章会出现在这里。")
                     : activeSource?.kind === "pending"
                       ? desktop
-                        ? t("点击左下角刷新订阅，获取最新文章。")
+                        ? t("点击「订阅」旁的刷新按钮，获取最新文章。")
                         : t("可以导入这个来源的 RSS 或 Atom 文件。")
                       : library.sources.length
                         ? t("去全部文章看看，或添加一个新的订阅。")
                         : t("添加博客或技术资讯，在本机安静阅读。")}
               </p>
+              {query.trim() && !wholeLibrary && (sourceId || view !== "all") && (
+                <button className="quiet-button" onClick={() => setSearchEverywhere(true)}>
+                  {t("搜索全部文章")}
+                </button>
+              )}
               {!query && (
                 <button
                   className="quiet-button"
@@ -1170,8 +1362,10 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
       <Reader
         article={article}
         source={source}
-        saved={!!article && library.saved.includes(article.id)}
-        read={!!article && library.read.includes(article.id)}
+        saved={!!article && savedIds.has(article.id)}
+        read={!!article && readIds.has(article.id)}
+        onFullText={desktop ? () => void fetchFullText() : undefined}
+        fetchingFullText={!!article && fetchingFullText.has(article.id)}
         preferences={library.preferences}
         focus={focus}
         position={article ? (positions.current[article.id] ?? 0) : 0}
@@ -1189,6 +1383,18 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
           );
         }}
       />
+      {sourceToEdit && (
+        <SourceEditDialog
+          key={sourceToEdit.id}
+          source={sourceToEdit}
+          sources={library.sources}
+          onSave={(name, path) => editSource(sourceToEdit, name, path)}
+          onClose={() => {
+            setSourceToEdit(null);
+            requestAnimationFrame(() => sourceMenuTrigger.current?.focus());
+          }}
+        />
+      )}
       <SubscriptionDialog
         open={addOpen}
         onOpenChange={setAddOpen}
@@ -1340,6 +1546,7 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
                       await nativeSave?.flush();
                       const result = await native.import(restore, true);
                       nativeSave?.resetRevision(result.revision);
+                      restoredGeneration.current++;
                       positions.current = result.library.positions;
                       setLibrary({
                         ...result.library,
@@ -1349,6 +1556,7 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
                       });
                       setUpdates([]);
                       setArchivedNotice(null);
+                      setBatchUndo([]);
                       setSourceId(null);
                       setView("all");
                       setRestore(null);
@@ -1361,7 +1569,10 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
                     }
                     return;
                   }
+                  restoredGeneration.current++;
                   positions.current = restore.positions;
+                  setArchivedNotice(null);
+                  setBatchUndo([]);
                   setLibrary({
                     ...restore,
                     preferences: normalizePreferences(restore.preferences),
@@ -1407,6 +1618,8 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
             origin.focus();
           else if (navTrigger.current?.getClientRects().length)
             navTrigger.current.focus();
+          else if (settingsTrigger.current?.getClientRects().length)
+            settingsTrigger.current.focus();
         }}
         locked={installLocked}
         preferences={library.preferences}
@@ -1415,9 +1628,7 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
         dataPath={loaded?.dataPath}
         storageError={t(storageError)}
         notice={t(notice)}
-        archivedSources={
-          desktop ? library.sources.filter((source) => source.archived) : []
-        }
+        archivedSources={library.sources.filter((source) => source.archived)}
         sourceBusy={sourceBusy}
         onRestoreSource={(source) => setSourceArchived(source, false)}
         onExportBackup={() =>
@@ -1433,9 +1644,7 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
         }
         onRestoreBackup={() => void chooseRestore()}
         onExportOpml={async () => {
-          const sources = libraryRef.current.sources.filter(
-            (source) => !source.archived && source.kind !== "demo",
-          );
+          const sources = orderedSources.filter((source) => source.kind !== "demo");
           if (!sources.length) {
             notify(t("添加自己的订阅后即可导出 OPML。"));
             return;

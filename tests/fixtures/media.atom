@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Atom 媒体验收</title>
+  <id>urn:media-test</id>
+  <link rel="self" href="http://127.0.0.1:15324/feed.atom"/>
+  <entry>
+    <id>urn:media-test-entry</id>
+    <title>Atom 附件与 XHTML 正文</title>
+    <link rel="alternate" href="http://127.0.0.1:15324/articles/post.html"/>
+    <link rel="enclosure" href="/episode.wav" type="audio/wav"/>
+    <content type="xhtml">
+      <div xmlns="http://www.w3.org/1999/xhtml">
+        <p>在 Atom 正文中显示图片。</p>
+        <img src="cover.png" alt="Atom 图片"/>
+      </div>
+    </content>
+  </entry>
+</feed>

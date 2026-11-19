@@ -1,4 +1,5 @@
 import type { Article, Library, Source } from "./model";
+import { fontSizes } from "./font-sizes.ts";
 
 export const initialSources: Source[] = [
   {
@@ -105,8 +106,8 @@ export function createLibrary(): Library {
     saved: [],
     positions: {},
     preferences: {
-      fontSize: 23,
-      font: "serif",
+      fontSize: fontSizes.default,
+      font: "sans",
       theme: "paper",
       accentColor: "",
       uiFontFamily: "",

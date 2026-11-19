@@ -7,6 +7,54 @@ import {
   mergeImport,
 } from "../src/model.ts";
 import { createLibrary } from "../src/data.ts";
+import { groupSources, orderSources, reorderedSourceIds } from "../src/source-layout.ts";
+import { discardImportedUpdates } from "../src/feed-updates.ts";
+
+test("an import supersedes only overlapping pending articles", () => {
+  const library = createLibrary();
+  const [source] = library.sources;
+  const visible = library.articles[0];
+  const introduced = { ...visible, id: "introduced" };
+  const remaining = { ...visible, id: "remaining" };
+  const queued = [{ source, articles: [visible, introduced, remaining], newCount: 2 }];
+  assert.deepEqual(discardImportedUpdates(queued, [visible, introduced], [visible]), [
+    { source, articles: [remaining], newCount: 1 },
+  ]);
+});
+
+test("cached body search respects the current feed and can expand to all feeds", () => {
+  const library = createLibrary();
+  const target = library.articles[0];
+  const other = library.sources.find((source) => source.id !== target.sourceId);
+  const text = (item) => item.id === target.id ? "正文里的独立句子" : "";
+  assert.deepEqual(filterArticles(library, "all", other.id, "正文里的独立句子", null, text), []);
+  assert.deepEqual(filterArticles(library, "all", null, "正文里的独立句子", null, text), [target]);
+});
+
+test("refresh keeps cached full text for the same article URL only", () => {
+  const library = createLibrary();
+  const article = { ...library.articles[0], url: "https://example.org/one", fullTextHtml: "<p>Cached</p>" };
+  library.articles[0] = article;
+  const update = { ...article, fullTextHtml: undefined };
+  assert.equal(mergeImport(library, [], [update]).articles[0].fullTextHtml, article.fullTextHtml);
+  assert.equal(mergeImport(library, [], [{ ...update, url: "https://example.org/two" }]).articles[0].fullTextHtml, undefined);
+});
+
+test("feed ordering and nested folders keep feed identities", () => {
+  const library = createLibrary();
+  const [one, two, three] = library.sources;
+  const sources = [
+    { ...one, name: "Zulu", folderPath: ["Tech", "Rust"] },
+    { ...two, name: "Between", folderPath: ["Other"] },
+    { ...three, name: "Alpha", folderPath: ["Tech", "Rust"] },
+  ];
+  const order = reorderedSourceIds(sources, one.id, 1);
+  assert.deepEqual(order, [three.id, two.id, one.id]);
+  const sorted = orderSources(sources, { ...library.preferences, feedOrder: order }, "en");
+  assert.deepEqual(groupSources(sorted).groups.get("Tech").groups.get("Rust").sources.map((s) => s.id), [three.id, one.id]);
+  const alphabetical = orderSources(sources, { ...library.preferences, sortFeedsByName: true }, "en");
+  assert.deepEqual(alphabetical.map((s) => s.id), [three.id, two.id, one.id]);
+});
 
 test("refreshing the same article keeps read, saved and reading position", () => {
   const library = createLibrary();

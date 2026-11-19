@@ -208,8 +208,7 @@ pub async fn install_app_update(
     {
         let db = state.db.lock().map_err(error)?;
         let db = db.as_ref().map_err(Clone::clone)?;
-        let loaded = db.load()?;
-        if loaded.revision != revision {
+        if db.revision()? != revision {
             return Err("阅读库在保存后发生变化，已取消安装，请重试。".into());
         }
         db.backup_before_update()?;

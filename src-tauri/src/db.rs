@@ -1,5 +1,5 @@
 use crate::model::*;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use std::{fs, path::PathBuf};
 
 pub struct Database {
@@ -8,6 +8,27 @@ pub struct Database {
 }
 fn err(e: impl std::fmt::Display) -> String {
     format!("本地阅读库读写失败：{e}")
+}
+fn keep_existing_article(
+    conn: &Connection,
+    article: &mut Article,
+    key: &str,
+) -> Result<bool, String> {
+    let old: Option<String> = conn
+        .query_row(
+            "SELECT data FROM articles WHERE source_id=?1 AND external_key=?2",
+            params![article.source_id, key],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(err)?;
+    let Some(old) = old else { return Ok(false) };
+    let old: Article = serde_json::from_str(&old).map_err(err)?;
+    article.id = old.id;
+    if article.full_text_html.is_none() && article.url == old.url {
+        article.full_text_html = old.full_text_html;
+    }
+    Ok(true)
 }
 impl Database {
     pub fn open(dir: PathBuf) -> Result<Self, String> {
@@ -53,13 +74,23 @@ impl Database {
             .duration_since(std::time::UNIX_EPOCH)
             .map_err(err)?
             .as_nanos();
-        let data = serde_json::to_vec_pretty(&self.load()?.library).map_err(err)?;
         use std::io::Write;
-        let mut file =
-            fs::File::create(folder.join(format!("before-update-{stamp}.json"))).map_err(err)?;
-        file.write_all(&data)
-            .and_then(|_| file.sync_all())
+        let path = folder.join(format!("before-update-{stamp}.json"));
+        let temporary = path.with_extension("tmp");
+        let library = self.load()?.library;
+        let mut file = std::io::BufWriter::new(fs::File::create(&temporary).map_err(err)?);
+        let result = serde_json::to_writer_pretty(&mut file, &library)
             .map_err(err)
+            .and_then(|()| {
+                file.flush()
+                    .and_then(|()| file.get_ref().sync_all())
+                    .map_err(err)
+            })
+            .and_then(|()| fs::rename(&temporary, path).map_err(err));
+        if result.is_err() {
+            let _ = fs::remove_file(temporary);
+        }
+        result
     }
     pub fn stored_preferences(&self) -> serde_json::Value {
         self.conn
@@ -107,6 +138,85 @@ impl Database {
         self.conn
             .query_row("SELECT generation FROM state WHERE id=1", [], |r| r.get(0))
             .map_err(err)
+    }
+    pub fn revision(&self) -> Result<i64, String> {
+        self.conn
+            .query_row("SELECT revision FROM state WHERE id=1", [], |r| r.get(0))
+            .map_err(err)
+    }
+    pub fn edit_source(
+        &mut self,
+        id: &str,
+        name: String,
+        folder_path: Vec<String>,
+    ) -> Result<Source, String> {
+        if name.trim().is_empty()
+            || name.chars().count() > 160
+            || folder_path.len() > 32
+            || folder_path
+                .iter()
+                .any(|part| part.trim().is_empty() || part.chars().count() > 120)
+        {
+            return Err("请输入有效的订阅名称和分组。".into());
+        }
+        let data: String = self
+            .conn
+            .query_row("SELECT data FROM sources WHERE id=?1", [id], |row| {
+                row.get(0)
+            })
+            .map_err(err)?;
+        let mut source: Source = serde_json::from_str(&data).map_err(err)?;
+        source.name = name.trim().into();
+        source.folder.clear();
+        source.folder_path = folder_path;
+        self.conn
+            .execute(
+                "UPDATE sources SET data=?1 WHERE id=?2",
+                params![serde_json::to_string(&source).map_err(err)?, id],
+            )
+            .map_err(err)?;
+        Ok(source)
+    }
+    pub fn article(&self, id: &str) -> Result<Article, String> {
+        let data: String = self
+            .conn
+            .query_row("SELECT data FROM articles WHERE id=?1", [id], |row| {
+                row.get(0)
+            })
+            .map_err(err)?;
+        serde_json::from_str(&data).map_err(err)
+    }
+    pub fn source_url(&self, id: &str) -> Result<String, String> {
+        self.conn
+            .query_row(
+                "SELECT json_extract(data, '$.url') FROM sources WHERE id=?1",
+                [id],
+                |row| row.get(0),
+            )
+            .map_err(err)
+    }
+    pub fn cache_full_text(
+        &mut self,
+        id: &str,
+        generation: i64,
+        url: &str,
+        html: &str,
+    ) -> Result<(), String> {
+        if generation != self.generation()? {
+            return Err("阅读库已发生变化，请重新获取全文。".into());
+        }
+        let mut article = self.article(id)?;
+        if article.url.as_deref() != Some(url) {
+            return Err("文章地址已发生变化，请重新获取全文。".into());
+        }
+        article.full_text_html = Some(html.into());
+        self.conn
+            .execute(
+                "UPDATE articles SET data=?1 WHERE id=?2",
+                params![serde_json::to_string(&article).map_err(err)?, id],
+            )
+            .map_err(err)?;
+        Ok(())
     }
     pub fn load(&self) -> Result<Loaded, String> {
         let (revision, data): (i64, String) = self
@@ -173,6 +283,14 @@ impl Database {
         Ok(expected + 1)
     }
     pub fn import(&mut self, library: Library, replace: bool) -> Result<Loaded, String> {
+        self.import_records(library, replace)?;
+        self.load()
+    }
+    pub fn import_records(
+        &mut self,
+        library: Library,
+        replace: bool,
+    ) -> Result<ImportedContent, String> {
         validate_library(&library)?;
         if replace {
             let old = self.load()?.library;
@@ -193,24 +311,35 @@ impl Database {
             tx.execute_batch("DELETE FROM articles; DELETE FROM sources;")
                 .map_err(err)?;
         }
-        for source in &library.sources {
-            tx.execute("INSERT INTO sources(id,data) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET data=excluded.data",params![source.id,serde_json::to_string(source).map_err(err)?]).map_err(err)?;
+        let mut sources = Vec::with_capacity(library.sources.len());
+        for mut source in library.sources {
+            if !replace {
+                let old: Option<String> = tx
+                    .query_row(
+                        "SELECT data FROM sources WHERE id=?1",
+                        [&source.id],
+                        |row| row.get(0),
+                    )
+                    .optional()
+                    .map_err(err)?;
+                if let Some(old) = old {
+                    let mut existing: Source = serde_json::from_str(&old).map_err(err)?;
+                    if source.kind == "imported" {
+                        existing.kind = source.kind;
+                    }
+                    source = existing;
+                }
+            }
+            tx.execute("INSERT INTO sources(id,data) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET data=excluded.data",params![source.id,serde_json::to_string(&source).map_err(err)?]).map_err(err)?;
+            sources.push(source);
         }
-        for article in &library.articles {
-            let mut a = article.clone();
+        let mut articles = Vec::with_capacity(library.articles.len());
+        for mut a in library.articles {
             let key = external_key(&a);
             a.external_id = Some(key.clone());
-            let existing: Option<String> = tx
-                .query_row(
-                    "SELECT id FROM articles WHERE source_id=?1 AND external_key=?2",
-                    params![a.source_id, key],
-                    |r| r.get(0),
-                )
-                .ok();
-            if let Some(id) = existing {
-                a.id = id;
-            }
+            keep_existing_article(&tx, &mut a, &key)?;
             tx.execute("INSERT INTO articles VALUES(?1,?2,?3,?4) ON CONFLICT(id) DO UPDATE SET data=excluded.data",params![a.id,a.source_id,key,serde_json::to_string(&a).map_err(err)?]).map_err(err)?;
+            articles.push(a);
         }
         if replace {
             let state = UserState {
@@ -227,7 +356,7 @@ impl Database {
             .map_err(err)?;
         }
         tx.commit().map_err(err)?;
-        self.load()
+        Ok(ImportedContent { sources, articles })
     }
     pub fn commit_feed(&mut self, feed: PreparedFeed) -> Result<Changes, String> {
         if feed.generation != self.generation()? {
@@ -248,7 +377,10 @@ impl Database {
             source.name = old.name;
             source.archived = old.archived;
             source.folder = old.folder;
+            source.folder_path = old.folder_path;
         }
+        source.last_success =
+            Some(chrono::DateTime::<chrono::Utc>::from(std::time::SystemTime::now()).to_rfc3339());
         let tx = self.conn.transaction().map_err(err)?;
         tx.execute(
             "INSERT INTO sources VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET data=excluded.data",
@@ -261,16 +393,7 @@ impl Database {
             a.source_id = source.id.clone();
             let key = external_key(&a);
             a.external_id = Some(key.clone());
-            let id: Option<String> = tx
-                .query_row(
-                    "SELECT id FROM articles WHERE source_id=?1 AND external_key=?2",
-                    params![source.id, key],
-                    |r| r.get(0),
-                )
-                .ok();
-            if let Some(id) = id {
-                a.id = id;
-            } else {
+            if !keep_existing_article(&tx, &mut a, &key)? {
                 new_count += 1;
             }
             tx.execute("INSERT INTO articles VALUES(?1,?2,?3,?4) ON CONFLICT(id) DO UPDATE SET data=excluded.data",params![a.id,a.source_id,key,serde_json::to_string(&a).map_err(err)?]).map_err(err)?;
@@ -307,6 +430,7 @@ mod tests {
                 kind: "imported".into(),
                 archived: false,
                 folder: "".into(),
+                folder_path: vec![],
                 last_success: None,
                 last_error: None,
             },
@@ -316,6 +440,7 @@ mod tests {
                 title: "One".into(),
                 excerpt: "".into(),
                 html: "<p>text</p>".into(),
+                full_text_html: None,
                 date: "".into(),
                 url: None,
                 demo: false,
@@ -359,6 +484,28 @@ mod tests {
         assert!(loaded.library.articles[0].title == "Updated");
     }
     #[test]
+    fn refresh_keeps_renamed_source_folder_and_cached_full_text() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = Database::open(dir.path().into()).unwrap();
+        let mut feed = sample();
+        let url = "https://example.org/article";
+        feed.articles[0].url = Some(url.into());
+        db.commit_feed(feed.clone()).unwrap();
+        let path = vec!["Technology".into(), "Rust".into()];
+        db.edit_source("s", "Revised".into(), path.clone()).unwrap();
+        db.cache_full_text("a", 0, url, "<p>Full article</p>")
+            .unwrap();
+        assert!(db.cache_full_text("a", 1, url, "stale").is_err());
+        let refreshed = db.commit_feed(feed).unwrap();
+        assert_eq!(refreshed.source.name, "Revised");
+        assert_eq!(refreshed.source.folder_path, path);
+        assert!(refreshed.source.last_success.is_some());
+        assert_eq!(
+            refreshed.articles[0].full_text_html.as_deref(),
+            Some("<p>Full article</p>")
+        );
+    }
+    #[test]
     fn stale_writes_and_restore_are_guarded() {
         let dir = tempfile::tempdir().unwrap();
         let mut db = Database::open(dir.path().into()).unwrap();
@@ -397,6 +544,31 @@ mod tests {
         assert!(db.import(library, true).is_err());
         assert_eq!(db.load().unwrap().library.articles[0].title, "One");
         assert_eq!(db.generation().unwrap(), 0);
+    }
+    #[test]
+    fn reading_font_size_limits_survive_save_and_restore() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = Database::open(dir.path().into()).unwrap();
+        let mut revision = 0;
+        for size in [10, 20, 36] {
+            let mut library = db.load().unwrap().library;
+            library.preferences["fontSize"] = serde_json::json!(size);
+            db.save(
+                UserState {
+                    preferences: library.preferences.clone(),
+                    read: vec![],
+                    saved: vec![],
+                    positions: Default::default(),
+                    selected_id: None,
+                },
+                revision,
+            )
+            .unwrap();
+            assert_eq!(db.load().unwrap().library.preferences["fontSize"], size);
+            let restored = db.import(library, true).unwrap();
+            assert_eq!(restored.library.preferences["fontSize"], size);
+            revision = restored.revision;
+        }
     }
     #[test]
     fn invalid_stored_preferences_are_reported_without_writing_defaults() {

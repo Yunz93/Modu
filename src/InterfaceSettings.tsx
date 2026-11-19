@@ -1,10 +1,11 @@
 import { useTranslation } from "./locale-context";
 import { useId } from "react";
 import { CaretDownIcon } from "@phosphor-icons/react";
-import { accentPresets, themePalettes, uiFontSizes } from "./appearance";
+import { accentPresets, themePalettes } from "./appearance";
 import { desktop } from "./desktop";
 import type { Preferences } from "./model";
-import { FontFamilyField } from "./TypographySettings";
+import { FontFamilyField, FontSizeField } from "./TypographySettings";
+import { fontSizes } from "./font-sizes";
 
 type Props = {
   preferences: Preferences;
@@ -26,7 +27,6 @@ export function InterfaceSettings({ preferences, effectiveTheme, fonts, onChange
   const accent = preferences.accentColor ?? "";
   const defaultAccent = themePalettes[effectiveTheme].accent;
   const customSelected = !accentPresets.some(({ color }) => color === accent);
-  const fontSize = preferences.uiFontSize ?? uiFontSizes.default;
 
   return (
     <div className="interface-settings">
@@ -103,18 +103,11 @@ export function InterfaceSettings({ preferences, effectiveTheme, fonts, onChange
         <p className="font-preview">{t("界面字体预览 · 墨牍 设置、侧边栏与工具栏")}</p>
       </div>
       <div className="setting-field">
-        <div className="setting-range-heading">
-          <label className="setting-label" htmlFor={`${id}-size`}>{t("UI 字体大小")}</label>
-          <output htmlFor={`${id}-size`}>{fontSize}px</output>
-        </div>
-        <input
-          className="setting-range"
-          id={`${id}-size`}
-          type="range"
-          min={uiFontSizes.min}
-          max={uiFontSizes.max}
-          value={fontSize}
-          onChange={(event) => onChange({ uiFontSize: event.target.valueAsNumber })}
+        <FontSizeField
+          label={t("界面字号")}
+          range={fontSizes}
+          value={preferences.uiFontSize ?? fontSizes.default}
+          onChange={(uiFontSize) => onChange({ uiFontSize })}
         />
         <p className="setting-hint">
           {t("调整界面文字大小。")} {desktop && t("也可用 ⌘ + / − 快速调整。")}

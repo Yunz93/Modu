@@ -204,16 +204,28 @@ export function useUpdateCenter(props: Props) {
         />
         {t("自动检查更新")}<span>{t("仅提示，不自动安装")}</span>
       </label>
-      <div
-        className="update-status"
-        role={phase === "error" ? "alert" : "status"}
-        aria-live="polite"
-      >
-        <p>{t(message || "可随时检查新版本。更新前会保存阅读进度并保留备份。", [update?.version])}</p>
-        {lastChecked && (
-          <small>
-            {t("最近成功检查：{0}", [new Date(lastChecked).toLocaleString(locale)])}
-          </small>
+      <div className="update-status-row">
+        <div
+          className="update-status"
+          role={phase === "error" ? "alert" : "status"}
+          aria-live="polite"
+        >
+          <p>{t(message || "可随时检查新版本。更新前会保存阅读进度并保留备份。", [update?.version])}</p>
+          {lastChecked && (
+            <small>
+              {t("最近成功检查：{0}", [new Date(lastChecked).toLocaleString(locale)])}
+            </small>
+          )}
+        </div>
+        {!downloading && (
+          <button
+            className="quiet-button update-check"
+            disabled={checking || locked}
+            onClick={() => void check()}
+          >
+            <ArrowClockwiseIcon size={18} />
+            {checking ? t("正在检查…") : t("检查更新")}
+          </button>
         )}
       </div>
       {update && (
@@ -242,7 +254,7 @@ export function useUpdateCenter(props: Props) {
           </p>
         </div>
       )}
-      <div className="update-actions">
+      {(downloading || update) && <div className="update-actions">
         {downloading ? (
           <>
             <button className="quiet-button" onClick={() => void cancel()}>
@@ -254,16 +266,6 @@ export function useUpdateCenter(props: Props) {
           </>
         ) : (
           <button
-            className="quiet-button"
-            disabled={checking || locked}
-            onClick={() => void check()}
-          >
-            <ArrowClockwiseIcon size={18} />
-            {checking ? t("正在检查…") : t("检查更新")}
-          </button>
-        )}
-        {update && !downloading && (
-          <button
             className="primary-button"
             disabled={
               locked || checking || (phase === "ready" && props.libraryBusy)
@@ -274,7 +276,7 @@ export function useUpdateCenter(props: Props) {
             {label}
           </button>
         )}
-      </div>
+      </div>}
       {update && phase === "available" && (
         <button
           className="skip-version quiet-button"

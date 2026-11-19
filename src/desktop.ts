@@ -23,6 +23,10 @@ export const native = {
     invoke<Source>("record_feed_failure", { id, message }),
   setSourceArchived: (id: string, archived: boolean) =>
     invoke<void>("set_subscription_archived", { id, archived }),
+  editSource: (id: string, name: string, folderPath: string[]) =>
+    invoke<Source>("edit_source", { id, name, folderPath }),
+  fullText: (id: string, expectedUrl: string) =>
+    invoke<string>("load_article_full_text", { id, expectedUrl }),
   snapshot: (library: Library) => {
     const { read, saved, positions, preferences, selectedId } = library;
     return invoke<Library>("export_library_snapshot", {
@@ -51,6 +55,8 @@ export const native = {
   commit: (feed: PreparedFeed) => invoke<Changes>("commit_feed", { feed }),
   import: (library: Library, replace: boolean) =>
     invoke<Loaded>("import_library", { library, replace }),
+  importFeedFile: (library: Library) =>
+    invoke<Pick<Library, "sources" | "articles">>("import_feed_file", { library }),
   readFile: (backup: boolean) =>
     invoke<{ name: string; contents: string } | null>("import_file", {
       backup,
