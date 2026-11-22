@@ -82,6 +82,7 @@ const english: Record<string, string> = {
   "文章列表": "Article list",
   "打开导航": "Open navigation",
   "关闭搜索": "Close search",
+  "搜索": "Search",
   "搜索文章": "Search articles",
   "搜索 · ⌘K": "Search · ⌘K",
   "{0} 篇文章{1}": "Articles ({0}){1}",

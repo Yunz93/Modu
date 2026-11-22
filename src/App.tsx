@@ -17,6 +17,7 @@ import {
   ArrowClockwiseIcon,
   BookmarkSimpleIcon,
   BookOpenIcon,
+  CaretDownIcon,
   CircleIcon,
   DotsThreeIcon,
   GearSixIcon,
@@ -1161,7 +1162,7 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
                   aria-label={listSearchLabel}
-                  placeholder={t("搜索文章")}
+                  placeholder={t("搜索")}
                 />
                 {query && (
                   <button
@@ -1175,17 +1176,20 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
                     <XIcon size={15} />
                   </button>
                 )}
+                {(sourceId || view !== "all") && (
+                  <div className="search-scope setting-select-wrap">
+                    <select
+                      aria-label={t("搜索范围")}
+                      value={searchEverywhere ? "all" : "current"}
+                      onChange={(event) => setSearchEverywhere(event.target.value === "all")}
+                    >
+                      <option value="current">{t(sourceId ? "当前订阅" : "当前列表")}</option>
+                      <option value="all">{t("全部文章")}</option>
+                    </select>
+                    <CaretDownIcon size={13} aria-hidden="true" />
+                  </div>
+                )}
               </div>
-              {(sourceId || view !== "all") && (
-                <div className="search-scope" role="group" aria-label={t("搜索范围")}>
-                  <button aria-pressed={!searchEverywhere} onClick={() => setSearchEverywhere(false)}>
-                    {t(sourceId ? "当前订阅" : "当前列表")}
-                  </button>
-                  <button aria-pressed={searchEverywhere} onClick={() => setSearchEverywhere(true)}>
-                    {t("全部文章")}
-                  </button>
-                </div>
-              )}
               <span className="sr-only" role="status">
                 {wholeLibrary
                   ? t("全库 · {0} 篇文章", [articles.length])
@@ -1310,7 +1314,6 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
                     </p>
                     <div className="article-row-meta">
                       <span className="article-source" title={itemSource?.name}>{itemSource?.name}</span>
-                      <span>·</span>
                       {publication
                         ? <time dateTime={publication.dateTime}>{publication.label}</time>
                         : <span>{t("日期未知")}</span>}

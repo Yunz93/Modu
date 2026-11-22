@@ -188,7 +188,6 @@ export function appearanceVariables(
     "--ui-font-size": `${uiSize}px`,
     "--ui-size-offset": `${uiSize - fontSizes.default}px`,
     "--reading-size": `${values.fontSize}px`,
-    "--reading-size-offset": `${values.fontSize - fontSizes.default}px`,
     "--reading-width": values.narrowReading ? "740px" : "1000px",
     "--code-font": fontFamilyCss(values.codeFontFamily, codeFontFallback),
     "--ui-font": fontFamilyCss(values.uiFontFamily, uiFontFallback),
