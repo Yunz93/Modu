@@ -24,6 +24,7 @@ import {
   ListBulletsIcon,
   MagnifyingGlassIcon,
   PlusIcon,
+  RssIcon,
   SidebarSimpleIcon,
   StackIcon,
   XIcon,
@@ -378,6 +379,10 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
   const wholeLibrary = searchOpen && searchEverywhere;
   const visibleUpdates = updates.filter((change) =>
     !library.sources.find((source) => source.id === change.source.id)?.archived,
+  );
+  const needsFirstRefresh = desktop && !query && view !== "saved" && (
+    activeSource?.kind === "pending" ||
+    (!activeSource && !library.articles.length && library.sources.some((item) => !item.archived))
   );
   const listSearchLabel = wholeLibrary ? t("搜索全部文章") : activeSource
     ? t("搜索此订阅")
@@ -1330,6 +1335,18 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
                 </button>
               );
             })
+          ) : needsFirstRefresh ? (
+            visibleUpdates.length === 0 && (
+              <div className="list-empty">
+                <RssIcon size={31} weight="light" />
+                <h2>{t(refreshing ? "正在刷新订阅…" : "还没有文章")}</h2>
+                {!refreshing && (
+                  <button className="quiet-button" disabled={sourceBusy} onClick={() => void refresh(activeSource?.id)}>
+                    {t("刷新订阅")}
+                  </button>
+                )}
+              </div>
+            )
           ) : (
             <div className="list-empty">
               {query ? (
@@ -1356,9 +1373,7 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
                   : view === "saved"
                     ? t("阅读时点击书签，值得重读的文章会出现在这里。")
                     : activeSource?.kind === "pending"
-                      ? desktop
-                        ? t("点击「订阅」旁的刷新按钮，获取最新文章。")
-                        : t("可以导入这个来源的 RSS 或 Atom 文件。")
+                      ? t("可以导入这个来源的 RSS 或 Atom 文件。")
                       : library.sources.length
                         ? t("去全部文章看看，或添加一个新的订阅。")
                         : t("添加博客或技术资讯，在本机安静阅读。")}
@@ -1400,6 +1415,7 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
         read={!!article && readIds.has(article.id)}
         onFullText={desktop ? () => void fetchFullText() : undefined}
         fetchingFullText={!!article && fetchingFullText.has(article.id)}
+        effectiveTheme={effectiveTheme}
         preferences={library.preferences}
         focus={focus}
         position={article ? (positions.current[article.id] ?? 0) : 0}

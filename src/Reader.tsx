@@ -9,6 +9,8 @@ import {
   BookmarkSimpleIcon,
   CheckIcon,
   CheckCircleIcon,
+  MoonIcon,
+  SunIcon,
   TextAaIcon,
 } from "@phosphor-icons/react";
 import { cleanArticleHtml } from "./feed-import";
@@ -21,6 +23,7 @@ type Props = {
   saved: boolean;
   read: boolean;
   focus: boolean;
+  effectiveTheme: Preferences["theme"];
   preferences: Preferences;
   position: number;
   onSave: () => void;
@@ -39,6 +42,7 @@ export function Reader({
   saved,
   read,
   focus,
+  effectiveTheme,
   preferences,
   position,
   onSave,
@@ -51,6 +55,8 @@ export function Reader({
   onPosition,
 }: Props) {
   const { t, locale } = useTranslation();
+  const night = effectiveTheme === "night";
+  const themeLabel = t(night ? "切换到浅色主题" : "切换到深色主题");
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const [fullTextArticleId, setFullTextArticleId] = useState<string>();
   const showFullText = !!article?.fullTextHtml && fullTextArticleId === article.id;
@@ -91,6 +97,14 @@ export function Reader({
           </button>
         )}
         <div className="reader-actions">
+          <button
+            className="icon-button"
+            aria-label={themeLabel}
+            title={themeLabel}
+            onClick={() => onPreferences({ theme: night ? "paper" : "night", followSystemTheme: false })}
+          >
+            {night ? <SunIcon size={22} aria-hidden="true" /> : <MoonIcon size={22} aria-hidden="true" />}
+          </button>
           <button
             className={`icon-button bookmark-button ${saved ? "is-saved" : ""}`}
             disabled={!article}
@@ -138,18 +152,18 @@ export function Reader({
           </Popover.Root>
           <span className="toolbar-divider" />
           <a
-            className={`quiet-button original-link ${article?.url ? "" : "is-disabled"}`}
+            className={`icon-button original-link ${article?.url ? "" : "is-disabled"}`}
             href={article?.url}
             target="_blank"
             rel="noopener noreferrer"
+            aria-label={t("在浏览器中打开")}
             aria-disabled={!article?.url}
             title={article?.url ? t("在浏览器中打开") : t("示例文章没有外部原文")}
             onClick={(event) => {
               if (!article?.url) event.preventDefault();
             }}
           >
-            <ArrowSquareOutIcon size={21} />
-            <span>{t("在浏览器中打开")}</span>
+            <ArrowSquareOutIcon size={21} aria-hidden="true" />
           </a>
           <span className="toolbar-divider focus-divider" />
           <button

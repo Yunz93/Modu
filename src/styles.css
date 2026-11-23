@@ -623,9 +623,6 @@ body:has(.desktop-frame) {
   background: var(--line);
   flex-shrink: 0;
 }
-.original-link {
-  padding: 4px 1px;
-}
 .original-link.is-disabled {
   color: var(--muted);
   cursor: default;
@@ -1114,8 +1111,7 @@ kbd {
   .reader-toolbar {
     padding-inline: 17px;
   }
-  .focus-button span,
-  .original-link span {
+  .focus-button span {
     display: none;
   }
   .reader-actions .quiet-button {
@@ -1405,13 +1401,26 @@ select.setting-select {
 .theme-options .setting-choice {
   background: var(--surface);
 }
-.accent-options {
+.accent-options,
+.accent-presets {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  align-items: center;
+  gap: 6px 12px;
+}
+.accent-options {
+  column-gap: 24px;
 }
 .accent-options .setting-choice {
   white-space: nowrap;
+}
+.accent-presets .setting-choice {
+  border-color: transparent;
+}
+.accent-options .custom-accent {
+  flex-shrink: 0;
+  margin-inline-start: auto;
+  cursor: pointer;
 }
 .setting-choice {
   position: relative;
@@ -1432,8 +1441,8 @@ select.setting-select {
   color: var(--accent);
 }
 .accent-dot {
-  flex: 0 0 12px;
-  height: 12px;
+  flex: 0 0 16px;
+  height: 16px;
   border-radius: 50%;
   box-shadow: inset 0 0 0 1px #0002;
 }

@@ -1,6 +1,6 @@
 import { useTranslation } from "./locale-context";
 import { useId } from "react";
-import { CaretDownIcon } from "@phosphor-icons/react";
+import { CaretDownIcon, EyedropperIcon } from "@phosphor-icons/react";
 import { accentPresets, themePalettes } from "./appearance";
 import { desktop } from "./desktop";
 import type { Preferences } from "./model";
@@ -67,19 +67,23 @@ export function InterfaceSettings({ preferences, effectiveTheme, fonts, onChange
       <div className="setting-field">
         <p className="setting-label" id={`${id}-accent`}>{t("主题色")}</p>
         <div className="accent-options" role="group" aria-labelledby={`${id}-accent`}>
-          {accentPresets.map(({ name, color }) => (
-            <button
-              key={t(name)}
-              className="setting-choice"
-              aria-pressed={accent === color}
-              onClick={() => onChange({ accentColor: color })}
-            >
-              <span className="accent-dot" style={{ background: color || defaultAccent }} />
-              {t(name)}
-            </button>
-          ))}
+          <div className="accent-presets">
+            {accentPresets.map(({ name, color }) => (
+              <button
+                key={name}
+                className="setting-choice"
+                aria-pressed={accent === color}
+                onClick={() => onChange({ accentColor: color })}
+              >
+                <span className="accent-dot" style={{ background: color || defaultAccent }} aria-hidden="true" />
+                {t(name)}
+              </button>
+            ))}
+          </div>
           <label className={`setting-choice custom-accent${customSelected ? " is-selected" : ""}`}>
-            <span className="accent-dot" style={{ background: accent || defaultAccent }} />
+            {customSelected
+              ? <span className="accent-dot" style={{ background: accent }} aria-hidden="true" />
+              : <EyedropperIcon size={16} aria-hidden="true" />}
             {t("自定义")}
             <input
               type="color"

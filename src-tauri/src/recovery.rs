@@ -155,6 +155,7 @@ mod tests {
     fn full_snapshot_includes_committed_background_content_and_unsaved_reading_facts() {
         let root = tempfile::tempdir().unwrap();
         let mut db = Database::open(root.path().into()).unwrap();
+        let initial_sources = db.load().unwrap().library.sources.len();
         let fixture: Library =
             serde_json::from_str(include_str!("../../tests/fixtures/demo-backup.json")).unwrap();
         db.import(fixture.clone(), false).unwrap();
@@ -172,7 +173,10 @@ mod tests {
         )
         .unwrap();
         assert_eq!(snapshot.articles.len(), fixture.articles.len());
-        assert_eq!(snapshot.sources.len(), fixture.sources.len());
+        assert_eq!(
+            snapshot.sources.len(),
+            initial_sources + fixture.sources.len()
+        );
         assert_eq!(snapshot.preferences["fontSize"], 26);
         assert_eq!(snapshot.saved, vec!["local-first"]);
         assert_eq!(snapshot.positions["local-first"], 420.);

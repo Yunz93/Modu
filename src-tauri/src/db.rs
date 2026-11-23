@@ -2,6 +2,17 @@ use crate::model::*;
 use rusqlite::{params, Connection, OptionalExtension};
 use std::{fs, path::PathBuf};
 
+const STARTER_FEEDS: [(&str, &str); 5] = [
+    ("潮流周刊", "https://weekly.tw93.fun/rss.xml"),
+    (
+        "阮一峰的网络日志",
+        "https://www.ruanyifeng.com/blog/atom.xml",
+    ),
+    ("少数派", "https://sspai.com/feed"),
+    ("GitHub Changelog", "https://github.blog/changelog/feed/"),
+    ("Cloudflare Blog", "https://blog.cloudflare.com/rss/"),
+];
+
 pub struct Database {
     conn: Connection,
     pub path: PathBuf,
@@ -35,7 +46,7 @@ impl Database {
         fs::create_dir_all(&dir).map_err(err)?;
         let path = dir.join("library.sqlite3");
         let existing = path.exists();
-        let conn = Connection::open(&path).map_err(err)?;
+        let mut conn = Connection::open(&path).map_err(err)?;
         if existing {
             let tables: i64 = conn.query_row("SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('sources','articles','state')", [], |row| row.get(0)).map_err(err)?;
             let has_state = tables == 3
@@ -48,23 +59,49 @@ impl Database {
                 return Err("本地阅读库结构不完整，原数据保持不变。请从完整备份恢复。".into());
             }
         }
-        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
-          CREATE TABLE IF NOT EXISTS sources(id TEXT PRIMARY KEY, data TEXT NOT NULL);
-          CREATE TABLE IF NOT EXISTS articles(id TEXT PRIMARY KEY, source_id TEXT NOT NULL REFERENCES sources(id), external_key TEXT NOT NULL, data TEXT NOT NULL, UNIQUE(source_id,external_key));
-          CREATE TABLE IF NOT EXISTS state(id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL, generation INTEGER NOT NULL, data TEXT NOT NULL);").map_err(err)?;
-        let empty = Library::default();
-        let state = UserState {
-            read: empty.read,
-            saved: empty.saved,
-            positions: empty.positions,
-            preferences: empty.preferences,
-            selected_id: None,
-        };
-        conn.execute(
-            "INSERT OR IGNORE INTO state VALUES(1,0,0,?1)",
-            [serde_json::to_string(&state).map_err(err)?],
-        )
-        .map_err(err)?;
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
+            .map_err(err)?;
+        if !existing {
+            let tx = conn.transaction().map_err(err)?;
+            tx.execute_batch(
+                "CREATE TABLE sources(id TEXT PRIMARY KEY, data TEXT NOT NULL);
+                 CREATE TABLE articles(id TEXT PRIMARY KEY, source_id TEXT NOT NULL REFERENCES sources(id), external_key TEXT NOT NULL, data TEXT NOT NULL, UNIQUE(source_id,external_key));
+                 CREATE TABLE state(id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL, generation INTEGER NOT NULL, data TEXT NOT NULL);",
+            )
+            .map_err(err)?;
+            let empty = Library::default();
+            let state = UserState {
+                read: empty.read,
+                saved: empty.saved,
+                positions: empty.positions,
+                preferences: empty.preferences,
+                selected_id: None,
+            };
+            tx.execute(
+                "INSERT INTO state VALUES(1,0,0,?1)",
+                [serde_json::to_string(&state).map_err(err)?],
+            )
+            .map_err(err)?;
+            for (name, url) in STARTER_FEEDS {
+                let source = Source {
+                    id: format!("feed:{}", crate::feeds::hash(url)),
+                    name: name.into(),
+                    url: url.into(),
+                    kind: "pending".into(),
+                    archived: false,
+                    folder: String::new(),
+                    folder_path: vec![],
+                    last_success: None,
+                    last_error: None,
+                };
+                tx.execute(
+                    "INSERT INTO sources VALUES(?1,?2)",
+                    params![source.id, serde_json::to_string(&source).map_err(err)?],
+                )
+                .map_err(err)?;
+            }
+            tx.commit().map_err(err)?;
+        }
         Ok(Self { conn, path })
     }
     pub fn backup_before_update(&self) -> Result<(), String> {
@@ -421,6 +458,42 @@ fn external_key(a: &Article) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn new_library_seeds_technology_feeds_once_and_defaults_to_system_font() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = Database::open(dir.path().into()).unwrap();
+        let library = db.load().unwrap().library;
+        assert_eq!(library.sources.len(), 5);
+        assert!(library.sources.iter().all(|source| {
+            source.kind == "pending" && source.url.starts_with("https://") && !source.archived
+        }));
+        assert_eq!(library.sources[0].name, "潮流周刊");
+        assert_eq!(library.sources[0].url, "https://weekly.tw93.fun/rss.xml");
+        assert!(library.articles.is_empty());
+        assert_eq!(library.preferences["font"], "sans");
+        assert_eq!(library.preferences["readingFontFamily"], "");
+
+        db.set_source_archived(&library.sources[0].id, true)
+            .unwrap();
+        drop(db);
+        let mut db = Database::open(dir.path().into()).unwrap();
+        let reopened = db.load().unwrap().library;
+        assert_eq!(reopened.sources.len(), 5);
+        assert!(reopened.sources[0].archived);
+
+        let mut personal_library = Library::default();
+        personal_library.preferences["readingFontFamily"] = "Georgia".into();
+        db.import(personal_library, true).unwrap();
+        drop(db);
+        let reopened = Database::open(dir.path().into())
+            .unwrap()
+            .load()
+            .unwrap()
+            .library;
+        assert!(reopened.sources.is_empty());
+        assert_eq!(reopened.preferences["readingFontFamily"], "Georgia");
+    }
+
     fn sample() -> PreparedFeed {
         PreparedFeed {
             source: Source {
@@ -613,26 +686,32 @@ mod tests {
     }
     #[test]
     fn source_failures_survive_restart_and_success_clears_them_without_removing_cache() {
+        let sample_source = |db: &Database| {
+            db.load()
+                .unwrap()
+                .library
+                .sources
+                .into_iter()
+                .find(|source| source.id == "s")
+                .unwrap()
+        };
         let dir = tempfile::tempdir().unwrap();
         let mut db = Database::open(dir.path().into()).unwrap();
         db.commit_feed(sample()).unwrap();
         db.record_feed_failure("s", "HTTP 503").unwrap();
         drop(db);
         let mut db = Database::open(dir.path().into()).unwrap();
-        assert_eq!(
-            db.load().unwrap().library.sources[0].last_error.as_deref(),
-            Some("HTTP 503")
-        );
+        assert_eq!(sample_source(&db).last_error.as_deref(), Some("HTTP 503"));
         assert_eq!(db.load().unwrap().library.articles.len(), 1);
         db.commit_feed(sample()).unwrap();
-        assert!(db.load().unwrap().library.sources[0].last_error.is_none());
+        assert!(sample_source(&db).last_error.is_none());
         db.set_source_archived("s", true).unwrap();
-        assert!(db.load().unwrap().library.sources[0].archived);
+        assert!(sample_source(&db).archived);
         db.commit_feed(sample()).unwrap();
-        assert!(db.load().unwrap().library.sources[0].archived);
+        assert!(sample_source(&db).archived);
         db.set_source_archived("s", false).unwrap();
         let loaded = db.load().unwrap();
-        assert!(!loaded.library.sources[0].archived);
+        assert!(!sample_source(&db).archived);
         assert_eq!(loaded.library.articles.len(), 1);
     }
 }
