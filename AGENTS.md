@@ -25,7 +25,7 @@ Build app UI in `src/`. Keep `.openai/hosting.json`, `worker/index.js`, `scripts
 
 ## Desktop implementation, 2026-11-18
 
-- Preserve the existing three-column layout and exact Mozi palette. A new native library starts in night appearance with five editable technology subscriptions, including 潮流周刊. Fetch their articles through the normal refresh action. Keep existing and migrated libraries intact and preserve imported preferences.
+- Preserve the existing three-column layout and exact Mozi palette. A new native library starts in night appearance with five editable technology subscriptions, including 潮流周刊. On upgrade, add missing presets once if a legacy library has no active subscriptions. Preserve existing subscriptions, archives, articles, and preferences. Fetch articles through the normal refresh action.
 - Rust owns network and SQLite; React owns reading UI. Never fall back to an empty writable library after native read failures.
 - Serialize user-state writes, flush before quit, preserve existing article IDs on feed refresh, and keep refresh results behind an explicit load banner.
 - Back up the current library before transactional restore. Unsubscribe is archival: preserve cached articles and bookmarks.
@@ -53,7 +53,7 @@ Build app UI in `src/`. Keep `.openai/hosting.json`, `worker/index.js`, `scripts
 - Keep the article search field and scope dropdown on one row, with the dropdown on the right. Hide the list subtitle while searching, and show the clear action when the field has text.
 - A left swipe reveals Unsubscribe on the right of the same row. Keep the subscription name on the left and use one shared row background and outline. Keep the source menu as another entry point. Both actions archive the subscription, offer immediate undo, and keep cached articles and reading facts. Archive and restore update the source flag without consuming pending refresh results.
 - Follow Mozi's global Interface settings structure for display language, theme, accent and UI typography. Keep article typography, line width and reading behavior in Reading. Aa opens a compact panel that shares the reading font selector and text-size slider. The font choices include system default, system serif, Tsanger JinKai 04, KingHwa OldSong and installed or manually entered families. Resolve named presets through local fonts and show a fallback hint when a preset is unavailable. Keep monospace code typography out of the settings UI.
-- Group the accent color presets as simple swatches with labels. Outline the selected preset and give the custom picker its own space.
+- Show accent presets as circular swatches with hover and accessible names. Show only the current color name beside the heading, ring the selected swatch, and give the custom picker its own space.
 - Keep the shared 10–20 px font-size range, 16 px default and 1 px step in `src/font-sizes.json`. Default both UI and reading to the system sans-serif font, with independent font and size preferences. Read older backups and clamp values above the current limit.
 - Place the light and dark appearance toggle immediately to the left of the bookmark in the reading toolbar. Switching explicitly selects a theme in the shared appearance preferences.
 - Show the original article action as an icon with an accessible name and a tooltip at every width.

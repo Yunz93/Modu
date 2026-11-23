@@ -1,7 +1,11 @@
 use crate::model::*;
-use rusqlite::{params, Connection, OptionalExtension};
-use std::{fs, path::PathBuf};
+use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
+const STARTER_FEEDS_SCHEMA_VERSION: u32 = 1;
 const STARTER_FEEDS: [(&str, &str); 5] = [
     ("潮流周刊", "https://weekly.tw93.fun/rss.xml"),
     (
@@ -20,6 +24,35 @@ pub struct Database {
 fn err(e: impl std::fmt::Display) -> String {
     format!("本地阅读库读写失败：{e}")
 }
+fn insert_missing_starter_feeds(conn: &Connection, sources: &[Source]) -> Result<(), String> {
+    for (name, url) in STARTER_FEEDS {
+        let id = format!("feed:{}", crate::feeds::hash(url));
+        if sources
+            .iter()
+            .any(|source| source.url == url || source.id == id)
+        {
+            continue;
+        }
+        let source = Source {
+            id,
+            name: name.into(),
+            url: url.into(),
+            kind: "pending".into(),
+            archived: false,
+            folder: String::new(),
+            folder_path: vec![],
+            last_success: None,
+            last_error: None,
+        };
+        conn.execute(
+            "INSERT INTO sources VALUES(?1,?2)",
+            params![source.id, serde_json::to_string(&source).map_err(err)?],
+        )
+        .map_err(err)?;
+    }
+    Ok(())
+}
+
 fn keep_existing_article(
     conn: &Connection,
     article: &mut Article,
@@ -82,25 +115,31 @@ impl Database {
                 [serde_json::to_string(&state).map_err(err)?],
             )
             .map_err(err)?;
-            for (name, url) in STARTER_FEEDS {
-                let source = Source {
-                    id: format!("feed:{}", crate::feeds::hash(url)),
-                    name: name.into(),
-                    url: url.into(),
-                    kind: "pending".into(),
-                    archived: false,
-                    folder: String::new(),
-                    folder_path: vec![],
-                    last_success: None,
-                    last_error: None,
-                };
-                tx.execute(
-                    "INSERT INTO sources VALUES(?1,?2)",
-                    params![source.id, serde_json::to_string(&source).map_err(err)?],
-                )
+            insert_missing_starter_feeds(&tx, &[])?;
+            tx.pragma_update(None, "user_version", STARTER_FEEDS_SCHEMA_VERSION)
                 .map_err(err)?;
-            }
             tx.commit().map_err(err)?;
+        } else {
+            let version: u32 = conn
+                .pragma_query_value(None, "user_version", |row| row.get(0))
+                .map_err(err)?;
+            if version < STARTER_FEEDS_SCHEMA_VERSION {
+                let tx = conn
+                    .transaction_with_behavior(TransactionBehavior::Immediate)
+                    .map_err(err)?;
+                let version: u32 = tx
+                    .pragma_query_value(None, "user_version", |row| row.get(0))
+                    .map_err(err)?;
+                if version < STARTER_FEEDS_SCHEMA_VERSION {
+                    let library = Self::load_at(&tx, &path)?.library;
+                    if library.sources.iter().all(|source| source.archived) {
+                        insert_missing_starter_feeds(&tx, &library.sources)?;
+                    }
+                    tx.pragma_update(None, "user_version", STARTER_FEEDS_SCHEMA_VERSION)
+                        .map_err(err)?;
+                }
+                tx.commit().map_err(err)?;
+            }
         }
         Ok(Self { conn, path })
     }
@@ -256,8 +295,10 @@ impl Database {
         Ok(())
     }
     pub fn load(&self) -> Result<Loaded, String> {
-        let (revision, data): (i64, String) = self
-            .conn
+        Self::load_at(&self.conn, &self.path)
+    }
+    fn load_at(conn: &Connection, path: &Path) -> Result<Loaded, String> {
+        let (revision, data): (i64, String) = conn
             .query_row("SELECT revision,data FROM state WHERE id=1", [], |r| {
                 Ok((r.get(0)?, r.get(1)?))
             })
@@ -265,15 +306,13 @@ impl Database {
         let state: UserState = serde_json::from_str(&data).map_err(err)?;
         let mut sources = vec![];
         let mut articles = vec![];
-        let mut stmt = self
-            .conn
+        let mut stmt = conn
             .prepare("SELECT data FROM sources ORDER BY rowid")
             .map_err(err)?;
         for row in stmt.query_map([], |r| r.get::<_, String>(0)).map_err(err)? {
             sources.push(serde_json::from_str(&row.map_err(err)?).map_err(err)?);
         }
-        let mut stmt = self
-            .conn
+        let mut stmt = conn
             .prepare(
                 "SELECT data FROM articles ORDER BY json_extract(data,'$.date') DESC,rowid DESC",
             )
@@ -295,7 +334,7 @@ impl Database {
         Ok(Loaded {
             library,
             revision,
-            data_path: self.path.to_string_lossy().into(),
+            data_path: path.to_string_lossy().into(),
         })
     }
     pub fn save(&mut self, state: UserState, expected: i64) -> Result<i64, String> {
@@ -458,6 +497,87 @@ fn external_key(a: &Article) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn upgrading_a_library_with_only_archived_feeds_adds_missing_presets_once() {
+        for archived_preset in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut db = Database::open(dir.path().into()).unwrap();
+            let mut feed = sample();
+            if archived_preset {
+                feed.source.id = "previously-subscribed".into();
+                feed.source.url = STARTER_FEEDS[0].1.into();
+                feed.articles[0].source_id = feed.source.id.clone();
+            }
+            feed.source.archived = true;
+            let mut previous = Library::default();
+            previous.sources.push(feed.source.clone());
+            previous.articles = feed.articles;
+            previous.saved.push("a".into());
+            previous.positions.insert("a".into(), 420.);
+            previous.preferences["readingFontFamily"] = "Georgia".into();
+            db.import(previous, true).unwrap();
+            db.conn.pragma_update(None, "user_version", 0).unwrap();
+            drop(db);
+
+            let mut db = Database::open(dir.path().into()).unwrap();
+            let library = db.load().unwrap().library;
+            let active: Vec<_> = library
+                .sources
+                .iter()
+                .filter(|source| !source.archived)
+                .collect();
+            assert_eq!(
+                active.len(),
+                STARTER_FEEDS.len() - usize::from(archived_preset)
+            );
+            assert_eq!(library.sources[0].id, feed.source.id);
+            assert!(library.sources[0].archived);
+            assert_eq!(library.articles.len(), 1);
+            assert_eq!(library.saved, ["a"]);
+            assert_eq!(library.positions["a"], 420.);
+            assert_eq!(library.preferences["readingFontFamily"], "Georgia");
+
+            for source in active {
+                db.set_source_archived(&source.id, true).unwrap();
+            }
+            drop(db);
+            let reopened = Database::open(dir.path().into())
+                .unwrap()
+                .load()
+                .unwrap()
+                .library;
+            assert_eq!(reopened.sources.len(), library.sources.len());
+            assert!(reopened.sources.iter().all(|source| source.archived));
+        }
+    }
+
+    #[test]
+    fn upgrading_a_library_with_active_feeds_does_not_add_presets_later() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = Database::open(dir.path().into()).unwrap();
+        let feed = sample();
+        db.import(
+            Library {
+                sources: vec![feed.source],
+                articles: feed.articles,
+                ..Library::default()
+            },
+            true,
+        )
+        .unwrap();
+        db.conn.pragma_update(None, "user_version", 0).unwrap();
+        drop(db);
+
+        let mut db = Database::open(dir.path().into()).unwrap();
+        assert_eq!(db.load().unwrap().library.sources.len(), 1);
+        db.set_source_archived("s", true).unwrap();
+        drop(db);
+        let db = Database::open(dir.path().into()).unwrap();
+        let library = db.load().unwrap().library;
+        assert_eq!(library.sources.len(), 1);
+        assert!(library.sources[0].archived);
+    }
+
     #[test]
     fn new_library_seeds_technology_feeds_once_and_defaults_to_system_font() {
         let dir = tempfile::tempdir().unwrap();

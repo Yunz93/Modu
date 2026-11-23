@@ -1406,21 +1406,50 @@ select.setting-select {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px 12px;
 }
 .accent-options {
-  column-gap: 24px;
+  gap: 8px 24px;
 }
-.accent-options .setting-choice {
-  white-space: nowrap;
+.accent-presets {
+  gap: 4px clamp(8px, 2vw, 20px);
 }
-.accent-presets .setting-choice {
-  border-color: transparent;
+.accent-label {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.accent-value {
+  color: var(--muted);
+  font-size: max(11px, calc(13px + var(--ui-size-offset, 0px)));
+  font-weight: 400;
+}
+.accent-swatch {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border-radius: 50%;
+}
+.accent-swatch .accent-dot {
+  width: 20px;
+  height: 20px;
+}
+@media (hover: hover) {
+  .accent-swatch:hover .accent-dot {
+    outline: 1px solid var(--muted);
+    outline-offset: 3px;
+  }
+}
+.accent-swatch[aria-pressed="true"] .accent-dot {
+  outline: 2px solid var(--ink);
+  outline-offset: 3px;
 }
 .accent-options .custom-accent {
   flex-shrink: 0;
   margin-inline-start: auto;
   cursor: pointer;
+  white-space: nowrap;
 }
 .setting-choice {
   position: relative;
@@ -1441,7 +1470,8 @@ select.setting-select {
   color: var(--accent);
 }
 .accent-dot {
-  flex: 0 0 16px;
+  flex-shrink: 0;
+  width: 16px;
   height: 16px;
   border-radius: 50%;
   box-shadow: inset 0 0 0 1px #0002;

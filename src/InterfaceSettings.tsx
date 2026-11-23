@@ -26,7 +26,7 @@ export function InterfaceSettings({ preferences, effectiveTheme, fonts, onChange
   const selectedTheme = preferences.followSystemTheme ? "system" : preferences.theme;
   const accent = preferences.accentColor ?? "";
   const defaultAccent = themePalettes[effectiveTheme].accent;
-  const customSelected = !accentPresets.some(({ color }) => color === accent);
+  const selectedAccent = accentPresets.find(({ color }) => color === accent);
 
   return (
     <div className="interface-settings">
@@ -65,23 +65,27 @@ export function InterfaceSettings({ preferences, effectiveTheme, fonts, onChange
         <p className="setting-hint">{t("选择浅色或深色主题，或随系统外观自动切换。")}</p>
       </div>
       <div className="setting-field">
-        <p className="setting-label" id={`${id}-accent`}>{t("主题色")}</p>
+        <p className="setting-label accent-label">
+          <span id={`${id}-accent`}>{t("主题色")}</span>
+          <span className="accent-value">{t(selectedAccent?.name ?? "自定义")}</span>
+        </p>
         <div className="accent-options" role="group" aria-labelledby={`${id}-accent`}>
           <div className="accent-presets">
             {accentPresets.map(({ name, color }) => (
               <button
                 key={name}
-                className="setting-choice"
+                className="accent-swatch"
+                aria-label={t(name)}
                 aria-pressed={accent === color}
+                title={t(name)}
                 onClick={() => onChange({ accentColor: color })}
               >
                 <span className="accent-dot" style={{ background: color || defaultAccent }} aria-hidden="true" />
-                {t(name)}
               </button>
             ))}
           </div>
-          <label className={`setting-choice custom-accent${customSelected ? " is-selected" : ""}`}>
-            {customSelected
+          <label className={`setting-choice custom-accent${selectedAccent ? "" : " is-selected"}`}>
+            {!selectedAccent
               ? <span className="accent-dot" style={{ background: accent }} aria-hidden="true" />
               : <EyedropperIcon size={16} aria-hidden="true" />}
             {t("自定义")}
