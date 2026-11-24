@@ -125,7 +125,7 @@ export function SubscriptionDialog({
           }}
         >
           <div className="dialog-symbol">
-            <RssSimpleIcon size={25} />
+            <RssSimpleIcon size={25} weight="bold" aria-hidden="true" />
           </div>
           <Dialog.Title>{t("添加订阅")}</Dialog.Title>
           <Dialog.Description>

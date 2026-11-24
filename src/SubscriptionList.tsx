@@ -155,7 +155,7 @@ export function SubscriptionList({
               }
               onClick={() => opened ? setOpenId(null) : onSelect(source.id)}
             >
-              <RssSimpleIcon size={23} aria-hidden="true" />
+              <RssSimpleIcon size={23} weight="bold" aria-hidden="true" />
               <span className="source-name" title={source.name}>{source.name}</span>
               {source.kind === "pending" && (
                 <span className="pending-source" title={t("订阅地址已保存，点击刷新获取文章")}>

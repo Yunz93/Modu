@@ -17,6 +17,7 @@ export type Article = {
   title: string;
   excerpt: string;
   html: string;
+  hasInlineContent?: boolean;
   fullTextHtml?: string;
   date: string;
   url?: string;
@@ -140,6 +141,8 @@ export function mergeImport(
     if (index < 0) nextArticles.push(normalized);
     else nextArticles[index] = {
       ...normalized,
+      hasInlineContent: normalized.hasInlineContent ??
+        (nextArticles[index].html === normalized.html ? nextArticles[index].hasInlineContent : undefined),
       fullTextHtml: normalized.fullTextHtml ??
         (nextArticles[index].url === normalized.url ? nextArticles[index].fullTextHtml : undefined),
     };
@@ -170,6 +173,7 @@ export function isLibrary(value: unknown): value is Library {
         typeof article.sourceId === "string" &&
         typeof article.title === "string" &&
         typeof article.html === "string" &&
+        (article.hasInlineContent === undefined || typeof article.hasInlineContent === "boolean") &&
         (article.fullTextHtml === undefined || typeof article.fullTextHtml === "string") &&
         typeof article.excerpt === "string" &&
         typeof article.date === "string" &&

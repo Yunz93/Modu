@@ -1360,7 +1360,7 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
           ) : needsFirstRefresh ? (
             visibleUpdates.length === 0 && (
               <div className="list-empty">
-                <RssIcon size={31} weight="light" />
+                <RssIcon size={31} weight="bold" aria-hidden="true" />
                 <h2>{t(refreshing ? "正在刷新订阅…" : "还没有文章")}</h2>
                 {!refreshing && (
                   <button className="quiet-button" disabled={sourceBusy} onClick={() => void refresh(activeSource?.id)}>

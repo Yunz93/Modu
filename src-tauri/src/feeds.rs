@@ -4,7 +4,7 @@ use scraper::{Html, Selector};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::fmt::Write;
-use std::net::IpAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
 use url::Url;
 const MAX_BYTES: usize = 8 * 1024 * 1024;
@@ -130,6 +130,7 @@ fn extract_full_text(bytes: &[u8], url: &Url, content_type: &str) -> Result<Stri
     let paragraphs = Selector::parse("p, pre").unwrap();
     for region in [
         "[itemprop=articleBody], .entry-content, .post-content, .article-content",
+        ".article__main__content",
         "article",
         "main, [role=main]",
     ] {
@@ -197,6 +198,109 @@ fn local_feed(url: &Url) -> bool {
     }
 }
 
+fn needs_public_article_dns(url: &Url, addresses: &[SocketAddr]) -> bool {
+    url.scheme() == "https"
+        && !local_feed(url)
+        && url.domain().is_some_and(|host| {
+            let host = host.trim_end_matches('.');
+            host.contains('.')
+                && ![
+                    ".alt",
+                    ".corp",
+                    ".example",
+                    ".home.arpa",
+                    ".i2p",
+                    ".internal",
+                    ".invalid",
+                    ".lan",
+                    ".onion",
+                    ".test",
+                ]
+                .iter()
+                .any(|suffix| host.ends_with(suffix))
+        })
+        && !addresses.is_empty()
+        && addresses.iter().all(|address| match address.ip() {
+            IpAddr::V4(ip) => {
+                let [a, b, ..] = ip.octets();
+                a == 198 && (18..=19).contains(&b)
+            }
+            IpAddr::V6(_) => false,
+        })
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct DnsResponse {
+    status: u16,
+    #[serde(default)]
+    answer: Vec<DnsAnswer>,
+}
+
+#[derive(Deserialize)]
+struct DnsAnswer {
+    #[serde(rename = "type")]
+    record_type: u16,
+    data: String,
+}
+
+fn dns_addresses(bytes: &[u8], record_type: u16, port: u16) -> Vec<SocketAddr> {
+    let Ok(result) = serde_json::from_slice::<DnsResponse>(bytes) else {
+        return Vec::new();
+    };
+    if result.status != 0 {
+        return Vec::new();
+    }
+    result
+        .answer
+        .into_iter()
+        .filter(|answer| answer.record_type == record_type)
+        .filter_map(|answer| answer.data.parse::<IpAddr>().ok())
+        .filter(|ip| ip.is_ipv4() == (record_type == 1))
+        .map(|ip| SocketAddr::new(ip, port))
+        .collect()
+}
+
+async fn query_public_article_dns(
+    client: &reqwest::Client,
+    host: &str,
+    record_type: u16,
+    port: u16,
+) -> Option<Vec<SocketAddr>> {
+    let mut url = Url::parse("https://1.1.1.1/dns-query").unwrap();
+    url.query_pairs_mut()
+        .append_pair("name", host)
+        .append_pair("type", &record_type.to_string());
+    let response = client
+        .get(url)
+        .header(reqwest::header::ACCEPT, "application/dns-json")
+        .send()
+        .await
+        .ok()?;
+    let (bytes, _) = read_response(response).await.ok()?;
+    Some(dns_addresses(&bytes, record_type, port))
+}
+
+async fn resolve_public_article_host(host: &str, port: u16) -> Result<Vec<SocketAddr>, String> {
+    // Fake-IP proxies may answer system DNS from the benchmark range. Ask only
+    // for the hostname and never use those virtual addresses for the fetch.
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(4))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|_| "无法查询全文域名的公网地址。")?;
+    let (ipv4, ipv6) = tokio::join!(
+        query_public_article_dns(&client, host, 1, port),
+        query_public_article_dns(&client, host, 28, port),
+    );
+    let addresses: Vec<_> = ipv4.into_iter().chain(ipv6).flatten().collect();
+    if addresses.is_empty() {
+        return Err("无法查询全文域名的公网地址。".into());
+    }
+    Ok(addresses)
+}
+
 async fn request_article(mut url: Url, source: Url) -> Result<(Vec<u8>, Url, String), String> {
     // A public feed cannot use the native reader to connect to a local service.
     // Resolve then pin the addresses so a second DNS lookup cannot change the destination.
@@ -210,12 +314,15 @@ async fn request_article(mut url: Url, source: Url) -> Result<(Vec<u8>, Url, Str
         match url.host() {
             Some(url::Host::Domain(host)) => {
                 let port = url.port_or_known_default().ok_or("全文地址无效。")?;
-                let addresses: Vec<_> = tokio::net::lookup_host((host, port))
+                let mut addresses: Vec<_> = tokio::net::lookup_host((host, port))
                     .await
                     .map_err(|_| "无法解析全文地址。")?
                     .collect();
                 if addresses.is_empty() {
                     return Err("无法解析全文地址。".into());
+                }
+                if !allow_local && needs_public_article_dns(&url, &addresses) {
+                    addresses = resolve_public_article_host(host, port).await?;
                 }
                 if !allow_local && addresses.iter().any(|address| !public_ip(address.ip())) {
                     return Err(blocked.into());
@@ -453,6 +560,11 @@ pub fn parse(bytes: &[u8], url: &Url, name: &str, generation: i64) -> Result<Pre
             .as_deref()
             .and_then(|href| Url::parse(href).ok())
             .unwrap_or_else(|| url.clone());
+        let has_inline_content = entry
+            .content
+            .as_ref()
+            .and_then(|content| content.body.as_deref())
+            .is_some_and(|content| !content.trim().is_empty());
         let mut clean = sanitize_markup(entry_body(&entry), &base, false);
         let inline = Html::parse_fragment(&clean);
         let excerpt = inline
@@ -502,6 +614,7 @@ pub fn parse(bytes: &[u8], url: &Url, name: &str, generation: i64) -> Result<Pre
             title,
             excerpt,
             html: clean,
+            has_inline_content: Some(has_inline_content),
             full_text_html: None,
             date,
             url: link,
@@ -566,6 +679,71 @@ mod tests {
         assert!(extract_full_text(b"<main><p>Log in</p></main>", &url, "text/html").is_err());
     }
     #[test]
+    fn full_text_prefers_sspai_body_over_article_controls() {
+        let body = "这是正文中的段落，图片也应该保留下来。".repeat(6);
+        let page = format!(
+            "<article>
+               <div class='article__header'><p>Share controls</p><img src='/qr.png'></div>
+               <div class='article__main__content wangEditor-txt'><p>{body}</p><img src='/figure.png'></div>
+               <div class='article__footer'><p>Author information</p></div>
+             </article>"
+        );
+        let url = Url::parse("https://sspai.com/post/119023").unwrap();
+        let full = extract_full_text(page.as_bytes(), &url, "text/html").unwrap();
+        assert!(full.contains(&body) && full.contains("https://sspai.com/figure.png"));
+        assert!(!full.contains("Share controls") && !full.contains("Author information"));
+        assert!(!full.contains("qr.png"));
+    }
+
+    #[test]
+    fn full_text_only_falls_back_for_virtual_dns_on_https_domains() {
+        let page = Url::parse("https://sspai.com/post/119023").unwrap();
+        let virtual_ip: SocketAddr = "198.18.0.35:443".parse().unwrap();
+        let public = "119.23.141.248:443".parse().unwrap();
+        let private = "192.168.0.10:443".parse().unwrap();
+        assert!(needs_public_article_dns(&page, &[virtual_ip]));
+        assert!(!public_ip(virtual_ip.ip()));
+        for excluded in [&[][..], &[private], &[public], &[virtual_ip, private]] {
+            assert!(!needs_public_article_dns(&page, excluded));
+        }
+        for address in [
+            "http://sspai.com/post/119023",
+            "https://myhost.local/post",
+            "https://printer.home.arpa/post",
+            "https://myhost.internal/post",
+            "https://private.onion/post",
+            "https://private.i2p/post",
+            "https://private.alt/post",
+            "https://myhost/post",
+            "https://198.18.0.35/post",
+        ] {
+            let url = Url::parse(address).unwrap();
+            assert!(!needs_public_article_dns(&url, &[virtual_ip]), "{url}");
+        }
+    }
+
+    #[test]
+    fn full_text_dns_parses_address_records_and_rejects_failed_responses() {
+        let response = br#"{
+          "Status": 0,
+          "Answer": [
+            {"type":5,"data":"canonical.example."},
+            {"type":1,"data":"119.23.141.248"},
+            {"type":28,"data":"2606:4700:4700::1111"}
+          ]
+        }"#;
+        assert_eq!(
+            dns_addresses(response, 1, 443),
+            ["119.23.141.248:443".parse().unwrap()]
+        );
+        assert_eq!(
+            dns_addresses(response, 28, 8443),
+            ["[2606:4700:4700::1111]:8443".parse().unwrap()]
+        );
+        assert!(dns_addresses(br#"{"Status":3}"#, 1, 443).is_empty());
+    }
+
+    #[test]
     fn full_text_respects_http_and_html_charsets() {
         let text = "这是一篇使用简体中文编码的测试文章。".repeat(6);
         let page = format!("<meta charset=gbk><article><p>{text}</p></article>");
@@ -588,6 +766,7 @@ mod tests {
             "10.0.0.1",
             "169.254.2.1",
             "100.64.0.1",
+            "198.18.0.35",
             "::1",
             "::ffff:127.0.0.1",
             "fc00::1",
@@ -651,14 +830,16 @@ mod tests {
     #[test]
     fn rss_atom_and_stable_ids() {
         let url = Url::parse("https://example.com/feed").unwrap();
-        for text in [
-            include_str!("../../tests/fixtures/reading.rss"),
-            include_str!("../../tests/fixtures/reading.atom"),
+        for (text, has_inline_content) in [
+            (include_str!("../../tests/fixtures/reading.rss"), false),
+            (include_str!("../../tests/fixtures/reading.atom"), true),
+            (include_str!("../../tests/fixtures/media.rss"), true),
         ] {
             let a = parse(text.as_bytes(), &url, "", 0).unwrap();
             let b = parse(text.as_bytes(), &url, "", 0).unwrap();
             assert!(!a.articles.is_empty());
             assert_eq!(a.articles[0].id, b.articles[0].id);
+            assert_eq!(a.articles[0].has_inline_content, Some(has_inline_content));
             assert!(!a.articles[0].html.contains("<script"));
         }
     }

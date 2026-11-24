@@ -40,6 +40,18 @@ test("refresh keeps cached full text for the same article URL only", () => {
   assert.equal(mergeImport(library, [], [{ ...update, url: "https://example.org/two" }]).articles[0].fullTextHtml, undefined);
 });
 
+test("legacy imports preserve declared feed content only for the same body", () => {
+  const library = createLibrary();
+  const article = { ...library.articles[0], hasInlineContent: true };
+  library.articles[0] = article;
+  const legacy = { ...article, hasInlineContent: undefined };
+  assert.equal(mergeImport(library, [], [legacy]).articles[0].hasInlineContent, true);
+  const changed = { ...legacy, html: "<p>Summary</p>" };
+  assert.equal(mergeImport(library, [], [changed]).articles[0].hasInlineContent, undefined);
+  const declaredSummary = { ...article, hasInlineContent: false };
+  assert.equal(mergeImport(library, [], [declaredSummary]).articles[0].hasInlineContent, false);
+});
+
 test("feed ordering and nested folders keep feed identities", () => {
   const library = createLibrary();
   const [one, two, three] = library.sources;

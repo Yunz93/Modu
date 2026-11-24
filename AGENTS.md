@@ -30,6 +30,7 @@ Build app UI in `src/`. Keep `.openai/hosting.json`, `worker/index.js`, `scripts
 - Serialize user-state writes, flush before quit, preserve existing article IDs on feed refresh, and keep refresh results behind an explicit load banner.
 - Back up the current library before transactional restore. Unsubscribe is archival: preserve cached articles and bookmarks.
 - Keep external pages outside the privileged WebView. Allow sanitized HTTP(S) image, audio and video URLs from article markup and feed attachments. Load images while reading, keep playback manual, and preserve article IDs across media changes. Keep third-party frames blocked.
+- Full-text fetches validate and pin the resolved addresses at every redirect. If system DNS returns only virtual addresses from the benchmark range for an HTTPS domain, the reader may query Cloudflare DNS over HTTPS with the hostname and still requires public destination addresses and the origin's valid TLS certificate.
 
 ## Modu productization, 2026-11-18
 
@@ -49,6 +50,7 @@ Build app UI in `src/`. Keep `.openai/hosting.json`, `worker/index.js`, `scripts
 ## Interface and reading settings
 
 - On macOS, extend the active canvas color under the native traffic lights. Keep the titlebar draggable and place a Phosphor open-book icon immediately left of the 墨牍 wordmark.
+- Use a white bold Phosphor RSS symbol on a rounded black tile for the macOS app icon. Use the bold RSS icon weight for subscription views.
 - Show publication time only on the current local day, and include the year for older articles from a different year. Name the active search scope and return keyboard focus to the search trigger on Escape.
 - Keep the article search field and scope dropdown on one row, with the dropdown on the right. Hide the list subtitle while searching, and show the clear action when the field has text.
 - A left swipe reveals Unsubscribe on the right of the same row. Keep the subscription name on the left and use one shared row background and outline. Keep the source menu as another entry point. Both actions archive the subscription, offer immediate undo, and keep cached articles and reading facts. Archive and restore update the source flag without consuming pending refresh results.
@@ -66,4 +68,4 @@ Build app UI in `src/`. Keep `.openai/hosting.json`, `worker/index.js`, `scripts
 - Put Check for updates alongside the current update status and last successful check. Keep download and install actions with their release details.
 - Keep the three columns when adding list tools. Scope batch read to the displayed results and undo only that batch. Preserve the search query when changing scope, and index both the feed body and cached full text.
 - Keep subscription metadata and refresh status separate from queued article payloads. Preserve OPML folder paths and manual order. Additive import writes only incoming records, with full replacements using the existing backup and generation checks.
-- Offer opt-in automatic refresh while the app runs. Full text is requested explicitly and cached for the matching article URL. Keep the feed content and its media available alongside the original link.
+- Offer opt-in automatic refresh while the app runs. Full text is requested explicitly and cached for the matching article URL. Hide the full-text action when the feed supplies a complete body, and keep it for excerpts and ambiguous content. Keep the feed content and its media available alongside the original link.

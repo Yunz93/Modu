@@ -43,6 +43,8 @@ pub struct Article {
     pub excerpt: String,
     pub html: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub has_inline_content: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub full_text_html: Option<String>,
     pub date: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]

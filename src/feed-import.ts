@@ -106,6 +106,26 @@ export function cleanArticleHtml(html: string, base?: string): string {
   return articleMarkup(html, base).innerHTML;
 }
 
+export function prepareFeedBody(html: string, base?: string, hasInlineContent?: boolean) {
+  const body = articleMarkup(html, base);
+  const text = body.textContent?.trim() ?? "";
+  const original = base && httpUrl(base);
+  const linksToMore = Array.from(body.querySelectorAll<HTMLAnchorElement>("a[href]")).some((link) => {
+    const label = link.textContent?.trim() ?? "";
+    return /^(?:查看全文|阅读全文|阅读更多|继续阅读|read more|read (?:the )?full article|continue reading)[\s。…»›→]*$/iu.test(label) &&
+      (text.endsWith(label) || link.href === original);
+  });
+  const truncated = /(?:…|\.{3})$/u.test(text);
+  // RSS descriptions and older saved articles can also contain a full body.
+  const paragraphs = Array.from(body.querySelectorAll("p"))
+    .filter((paragraph) => (paragraph.textContent?.trim().length ?? 0) >= 16);
+  const structured = paragraphs.length >= 4 && text.length >= 400;
+  const complete = !linksToMore && !truncated && (hasInlineContent
+    ? Boolean(text || body.querySelector(mediaSourceSelector))
+    : structured);
+  return { markup: { __html: body.innerHTML }, complete };
+}
+
 const indexedText = new WeakMap<Article, string>();
 
 export function cachedArticleText(article: Article): string {
@@ -206,11 +226,8 @@ export function parseFeedFile(xml: string): {
   const seenKeys = new Set<string>();
   const articles: Article[] = children(channel, atom ? "entry" : "item").flatMap(
     (item) => {
-      const rawHtml =
-        feedMarkup(item, "encoded") ||
-        feedMarkup(item, "content") ||
-        feedMarkup(item, "description") ||
-        feedMarkup(item, "summary");
+      const inlineContent = feedMarkup(item, "encoded") || feedMarkup(item, "content");
+      const rawHtml = inlineContent || feedMarkup(item, "description") || feedMarkup(item, "summary");
       const rawLink = atom
         ? children(item, "link")
             .find(
@@ -245,6 +262,7 @@ export function parseFeedFile(xml: string): {
         title,
         excerpt: content.slice(0, 220),
         html: body.innerHTML,
+        hasInlineContent: Boolean(inlineContent),
         date,
         url: articleUrl,
       }];

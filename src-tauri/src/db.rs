@@ -69,6 +69,9 @@ fn keep_existing_article(
     let Some(old) = old else { return Ok(false) };
     let old: Article = serde_json::from_str(&old).map_err(err)?;
     article.id = old.id;
+    if article.has_inline_content.is_none() && article.html == old.html {
+        article.has_inline_content = old.has_inline_content;
+    }
     if article.full_text_html.is_none() && article.url == old.url {
         article.full_text_html = old.full_text_html;
     }
@@ -633,6 +636,7 @@ mod tests {
                 title: "One".into(),
                 excerpt: "".into(),
                 html: "<p>text</p>".into(),
+                has_inline_content: None,
                 full_text_html: None,
                 date: "".into(),
                 url: None,

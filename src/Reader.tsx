@@ -13,7 +13,7 @@ import {
   SunIcon,
   TextAaIcon,
 } from "@phosphor-icons/react";
-import { cleanArticleHtml } from "./feed-import";
+import { cleanArticleHtml, prepareFeedBody } from "./feed-import";
 import { ReadingSettings, useFontChoices } from "./TypographySettings";
 import type { Article, Preferences, Source } from "./model";
 
@@ -66,9 +66,16 @@ export function Reader({
   const restoring = useRef(false);
   const initialPosition = useRef(position);
   initialPosition.current = position;
+  const articleBase = article?.url ?? source?.url;
+  const feedBody = useMemo(
+    () => prepareFeedBody(article?.html ?? "", articleBase, article?.hasInlineContent),
+    [article?.html, articleBase, article?.hasInlineContent],
+  );
   const markup = useMemo(
-    () => ({ __html: cleanArticleHtml((showFullText ? article?.fullTextHtml : article?.html) ?? "", article?.url ?? source?.url) }),
-    [showFullText, article?.fullTextHtml, article?.html, article?.url, source?.url],
+    () => showFullText
+      ? { __html: cleanArticleHtml(article?.fullTextHtml ?? "", articleBase) }
+      : feedBody.markup,
+    [showFullText, article?.fullTextHtml, articleBase, feedBody.markup],
   );
   useEffect(() => {
     restoring.current = true;
@@ -214,7 +221,7 @@ export function Reader({
                     </time>
                   </>
                 )}
-                {article.url && (onFullText || article.fullTextHtml) && (
+                {article.url && (article.fullTextHtml || (onFullText && !feedBody.complete)) && (
                   article.fullTextHtml
                     ? <button
                         className="full-text-action"
