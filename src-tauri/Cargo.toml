@@ -1,6 +1,6 @@
 [package]
 name = "modu"
-version = "0.2.4"
+version = "0.2.5"
 description = "墨牍 — 本地 RSS 阅读器"
 edition = "2021"
 rust-version = "1.90"

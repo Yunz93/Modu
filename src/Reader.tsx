@@ -90,10 +90,13 @@ export function Reader({
           <ArrowLeftIcon size={22} />
         </button>
         {focus && (
-          <button className="quiet-button exit-focus" onClick={onFocus}>
-            <ArrowsInSimpleIcon size={19} />
-            <span>{t("退出专注")}</span>
-            <kbd>Esc</kbd>
+          <button
+            className="icon-button exit-focus"
+            aria-label={t("退出专注")}
+            title={t("退出专注 · Esc")}
+            onClick={onFocus}
+          >
+            <ArrowsInSimpleIcon size={22} aria-hidden="true" />
           </button>
         )}
         <div className="reader-actions">
@@ -115,7 +118,6 @@ export function Reader({
           >
             <BookmarkSimpleIcon size={23} weight={saved ? "fill" : "regular"} />
           </button>
-          <span className="toolbar-divider" />
           <Popover.Root open={appearanceOpen} onOpenChange={setAppearanceOpen}>
             <Popover.Trigger asChild>
               <button
@@ -150,7 +152,6 @@ export function Reader({
               </Popover.Content>
             </Popover.Portal>
           </Popover.Root>
-          <span className="toolbar-divider" />
           <a
             className={`icon-button original-link ${article?.url ? "" : "is-disabled"}`}
             href={article?.url}
@@ -165,20 +166,16 @@ export function Reader({
           >
             <ArrowSquareOutIcon size={21} aria-hidden="true" />
           </a>
-          <span className="toolbar-divider focus-divider" />
-          <button
-            className="quiet-button focus-button"
-            aria-pressed={focus}
-            title={t("专注模式 · F")}
-            onClick={onFocus}
-          >
-            {focus ? (
-              <ArrowsInSimpleIcon size={22} />
-            ) : (
-              <ArrowsOutSimpleIcon size={22} />
-            )}
-            <span>{focus ? t("退出专注") : t("专注模式")}</span>
-          </button>
+          {!focus && (
+            <button
+              className="icon-button focus-button"
+              aria-label={t("专注模式")}
+              title={t("专注模式 · F")}
+              onClick={onFocus}
+            >
+              <ArrowsOutSimpleIcon size={22} aria-hidden="true" />
+            </button>
+          )}
         </div>
       </div>
       <div

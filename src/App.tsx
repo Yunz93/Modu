@@ -19,6 +19,7 @@ import {
   BookOpenIcon,
   CaretDownIcon,
   CircleIcon,
+  ClockCounterClockwiseIcon,
   DotsThreeIcon,
   GearSixIcon,
   ListBulletsIcon,
@@ -910,6 +911,8 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
     save: flushReadingState,
   });
   const refreshLabel = t(refreshing ? "停止刷新" : "刷新订阅");
+  const refreshStatusLabel = t("订阅更新状态");
+  const failedSources = desktop ? orderedSources.filter((source) => source.lastError) : [];
   const lastRefresh = library.preferences.lastFeedRefresh;
   const refreshSummary = lastRefresh &&
     typeof lastRefresh.at === "string" &&
@@ -948,6 +951,61 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
         <div className="subscription-heading">
           <h2>{t("订阅")}</h2>
           <div className="subscription-tools">
+            {desktop && (
+              <Popover.Root>
+                <Popover.Trigger asChild>
+                  <button
+                    className="icon-button refresh-status-button"
+                    aria-label={refreshStatusLabel}
+                    title={refreshStatusLabel}
+                  >
+                    <ClockCounterClockwiseIcon size={19} aria-hidden="true" />
+                  </button>
+                </Popover.Trigger>
+                <Popover.Portal>
+                  <Popover.Content
+                    className="source-actions feed-refresh-popover"
+                    aria-label={refreshStatusLabel}
+                    align="end"
+                    sideOffset={6}
+                    collisionPadding={12}
+                  >
+                    <header className="feed-refresh-heading">
+                      <strong>{refreshStatusLabel}</strong>
+                      <Popover.Close asChild>
+                        <button className="icon-button" aria-label={t("收起更新结果")} title={t("收起更新结果")}>
+                          <XIcon size={17} aria-hidden="true" />
+                        </button>
+                      </Popover.Close>
+                    </header>
+                    <p className="feed-refresh-summary" role="status">
+                      {refreshing ? t("正在刷新订阅…") : refreshSummary || (!failedSources.length && t("还没有刷新记录。"))}
+                    </p>
+                    {failedSources.length > 0 && (
+                      <>
+                        <ul className="feed-errors">
+                          {failedSources.map((source) => (
+                            <li key={source.id}>
+                              <strong>{t("{0} 更新失败", [source.name])}</strong>
+                              <p>{source.lastError}</p>
+                              <button
+                                className="quiet-button"
+                                aria-label={t("重试 {0}", [source.name])}
+                                disabled={refreshing || sourceBusy}
+                                onClick={() => void refresh(source.id)}
+                              >
+                                {t("重试此订阅")}
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                        <p className="feed-refresh-hint">{t("缓存文章仍可阅读")}</p>
+                      </>
+                    )}
+                  </Popover.Content>
+                </Popover.Portal>
+              </Popover.Root>
+            )}
             <button
               className="icon-button"
               aria-label={t("添加订阅")}
@@ -972,11 +1030,6 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
             </button>
           </div>
         </div>
-        {desktop && (refreshing || refreshSummary) && (
-          <p className="subscription-refresh-summary" role="status">
-            {refreshing ? t("正在刷新订阅…") : refreshSummary}
-          </p>
-        )}
         <SubscriptionList
           sources={orderedSources}
           unreadBySource={unreadBySource}
@@ -1258,37 +1311,6 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
               : t("订阅已刷新 · 点击载入")}
           </button>
         )}
-        {desktop &&
-          library.sources.some(
-            (s) =>
-              !s.archived && s.lastError && (!sourceId || s.id === sourceId),
-          ) && (
-            <section className="feed-errors" aria-label={t("订阅更新状态")}>
-              {library.sources
-                .filter(
-                  (s) =>
-                    !s.archived &&
-                    s.lastError &&
-                    (!sourceId || s.id === sourceId),
-                )
-                .map((source) => (
-                  <div key={source.id}>
-                    <p>
-                      <strong>{t("{0} 更新失败", [source.name])}</strong>
-                      <br />
-                      {source.lastError}
-                    </p>
-                    <button
-                      disabled={refreshing || sourceBusy}
-                      onClick={() => void refresh(source.id)}
-                    >
-                      {t("重试此订阅")}
-                    </button>
-                    <span>{t("缓存文章仍可阅读")}</span>
-                  </div>
-                ))}
-            </section>
-          )}
         <div className={`article-list-scroll ${library.preferences.compactList ? "compact-list" : ""}`}>
           {articles.length ? (
             articles.map((item) => {
