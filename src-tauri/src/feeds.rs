@@ -78,6 +78,21 @@ fn network_client() -> Result<reqwest::Client, String> {
         .map_err(|_| "无法初始化网络连接。".into())
 }
 
+struct ArticleRelativeUrl<'a>(&'a Url);
+
+impl<'a> ammonia::UrlRelativeEvaluate<'a> for ArticleRelativeUrl<'a> {
+    fn evaluate<'url>(&self, link: &'url str) -> Option<std::borrow::Cow<'url, str>> {
+        if link.starts_with('#') {
+            Some(std::borrow::Cow::Borrowed(link))
+        } else {
+            self.0
+                .join(link)
+                .ok()
+                .map(|url| std::borrow::Cow::Owned(url.into()))
+        }
+    }
+}
+
 fn sanitize_markup(input: &str, base: &Url, full_text: bool) -> String {
     let mut sanitizer = ammonia::Builder::default();
     if full_text {
@@ -85,16 +100,108 @@ fn sanitize_markup(input: &str, base: &Url, full_text: bool) -> String {
             .rm_tags(["nav", "footer", "aside", "form", "iframe"])
             .add_clean_content_tags(["nav", "footer", "aside", "form", "iframe"]);
     }
-    sanitizer
-        .add_tags(["audio", "video", "source"])
-        .add_tag_attributes("img", ["data-src"])
+    let mut clean = sanitizer
+        .add_tags(["audio", "video", "source", "picture", "track"])
+        .add_generic_attributes(["id"])
+        .add_tag_attributes("a", ["name"])
+        .add_tag_attributes("code", ["class"])
+        .add_tag_attributes("pre", ["class"])
+        .add_tag_attributes("img", ["data-src", "data-srcset", "srcset"])
         .add_tag_attributes("audio", ["src", "controls"])
-        .add_tag_attributes("video", ["src", "controls", "poster", "width", "height"])
-        .add_tag_attributes("source", ["src", "type"])
+        .add_tag_attributes(
+            "video",
+            [
+                "src",
+                "controls",
+                "poster",
+                "width",
+                "height",
+                "crossorigin",
+            ],
+        )
+        .add_tag_attributes(
+            "source",
+            ["src", "type", "srcset", "data-srcset", "media", "sizes"],
+        )
+        .add_tag_attributes("img", ["sizes"])
+        .add_tag_attributes("track", ["src", "kind", "srclang", "label", "default"])
+        .add_tags([
+            "math",
+            "semantics",
+            "annotation",
+            "mrow",
+            "mi",
+            "mn",
+            "mo",
+            "mtext",
+            "mspace",
+            "ms",
+            "mfrac",
+            "msqrt",
+            "mroot",
+            "msub",
+            "msup",
+            "msubsup",
+            "munder",
+            "mover",
+            "munderover",
+            "mtable",
+            "mtr",
+            "mtd",
+            "mfenced",
+            "mstyle",
+            "mpadded",
+            "mphantom",
+            "menclose",
+            "mmultiscripts",
+            "mprescripts",
+            "none",
+        ])
+        .add_tag_attributes("math", ["display"])
         .url_schemes(["http", "https"].into_iter().collect())
-        .url_relative(ammonia::UrlRelative::RewriteWithBase(base.clone()))
+        .url_relative(ammonia::UrlRelative::Custom(Box::new(ArticleRelativeUrl(
+            base,
+        ))))
         .clean(input)
-        .to_string()
+        .to_string();
+    if input.to_ascii_lowercase().contains("<iframe") {
+        let fragment = Html::parse_fragment(input);
+        let frames = Selector::parse("iframe[src]").unwrap();
+        let mut seen = std::collections::HashSet::new();
+        for frame in fragment.select(&frames).take(32) {
+            if full_text
+                && frame
+                    .ancestors()
+                    .filter_map(scraper::ElementRef::wrap)
+                    .any(|el| matches!(el.value().name(), "nav" | "aside" | "footer" | "form"))
+            {
+                continue;
+            }
+            let Some(url) = frame
+                .attr("src")
+                .and_then(|src| base.join(src).ok())
+                .and_then(|url| safe_url(url.as_str()).ok())
+            else {
+                continue;
+            };
+            if seen.insert(url.clone()) {
+                let _ = write!(
+                    clean,
+                    "<p><a data-modu-embed=\"\" href=\"{}\">打开嵌入内容</a></p>",
+                    escape_markup(url.as_str())
+                );
+            }
+        }
+    }
+    clean
+}
+
+fn escape_markup(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
 }
 
 fn charset(content_type: &str) -> Option<&'static Encoding> {
@@ -128,6 +235,8 @@ fn extract_full_text(bytes: &[u8], url: &Url, content_type: &str) -> Result<Stri
     let (decoded, _, _) = encoding.decode(bytes);
     let html = Html::parse_document(&decoded);
     let paragraphs = Selector::parse("p, pre").unwrap();
+    let meaningful_elements = Selector::parse("img[src], img[data-src], img[srcset], img[data-srcset], picture source[srcset], picture source[data-srcset], video[src], video source[src], audio[src], audio source[src], table td, table th, math, a[data-modu-embed]").unwrap();
+    let prose = Selector::parse("p, pre, blockquote, li").unwrap();
     for region in [
         "[itemprop=articleBody], .entry-content, .post-content, .article-content",
         ".article__main__content",
@@ -154,7 +263,15 @@ fn extract_full_text(bytes: &[u8], url: &Url, content_type: &str) -> Result<Stri
                 .flat_map(|p| p.text())
                 .map(|text| text.trim().chars().count())
                 .sum::<usize>();
-            if length >= 80 {
+            let is_article = !region.starts_with("main");
+            let has_short_body = is_article
+                && fragment
+                    .select(&prose)
+                    .any(|element| element.text().any(|text| !text.trim().is_empty()));
+            if length >= 80
+                || has_short_body
+                || fragment.select(&meaningful_elements).next().is_some()
+            {
                 return Ok(cleaned);
             }
         }
@@ -301,39 +418,43 @@ async fn resolve_public_article_host(host: &str, port: u16) -> Result<Vec<Socket
     Ok(addresses)
 }
 
-async fn request_article(mut url: Url, source: Url) -> Result<(Vec<u8>, Url, String), String> {
+async fn pinned_reader_client(url: &Url, allow_local: bool) -> Result<reqwest::Client, String> {
     // A public feed cannot use the native reader to connect to a local service.
     // Resolve then pin the addresses so a second DNS lookup cannot change the destination.
+    let blocked = "全文地址指向本地网络，已保留订阅内容。";
+    let mut builder = reqwest::Client::builder()
+        .user_agent(concat!("Modu/", env!("CARGO_PKG_VERSION"), " RSS Reader"))
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none());
+    match url.host() {
+        Some(url::Host::Domain(host)) => {
+            let port = url.port_or_known_default().ok_or("全文地址无效。")?;
+            let mut addresses: Vec<_> = tokio::net::lookup_host((host, port))
+                .await
+                .map_err(|_| "无法解析全文地址。")?
+                .collect();
+            if addresses.is_empty() {
+                return Err("无法解析全文地址。".into());
+            }
+            if !allow_local && needs_public_article_dns(url, &addresses) {
+                addresses = resolve_public_article_host(host, port).await?;
+            }
+            if !allow_local && addresses.iter().any(|address| !public_ip(address.ip())) {
+                return Err(blocked.into());
+            }
+            builder = builder.resolve_to_addrs(host, &addresses);
+        }
+        Some(url::Host::Ipv4(ip)) if allow_local || public_ip(ip.into()) => {}
+        Some(url::Host::Ipv6(ip)) if allow_local || public_ip(ip.into()) => {}
+        _ => return Err(blocked.into()),
+    }
+    builder.build().map_err(|_| "无法初始化网络连接。".into())
+}
+
+async fn request_article(mut url: Url, source: Url) -> Result<(Vec<u8>, Url, String), String> {
     for _ in 0..=8 {
         let allow_local = local_feed(&source) && source.origin() == url.origin();
-        let blocked = "全文地址指向本地网络，已保留订阅内容。";
-        let mut builder = reqwest::Client::builder()
-            .user_agent(concat!("Modu/", env!("CARGO_PKG_VERSION"), " RSS Reader"))
-            .no_proxy()
-            .redirect(reqwest::redirect::Policy::none());
-        match url.host() {
-            Some(url::Host::Domain(host)) => {
-                let port = url.port_or_known_default().ok_or("全文地址无效。")?;
-                let mut addresses: Vec<_> = tokio::net::lookup_host((host, port))
-                    .await
-                    .map_err(|_| "无法解析全文地址。")?
-                    .collect();
-                if addresses.is_empty() {
-                    return Err("无法解析全文地址。".into());
-                }
-                if !allow_local && needs_public_article_dns(&url, &addresses) {
-                    addresses = resolve_public_article_host(host, port).await?;
-                }
-                if !allow_local && addresses.iter().any(|address| !public_ip(address.ip())) {
-                    return Err(blocked.into());
-                }
-                builder = builder.resolve_to_addrs(host, &addresses);
-            }
-            Some(url::Host::Ipv4(ip)) if allow_local || public_ip(ip.into()) => {}
-            Some(url::Host::Ipv6(ip)) if allow_local || public_ip(ip.into()) => {}
-            _ => return Err(blocked.into()),
-        }
-        let client = builder.build().map_err(|_| "无法初始化网络连接。")?;
+        let client = pinned_reader_client(&url, allow_local).await?;
         let response = request(&client, &url).await?;
         if !response.status().is_redirection() {
             let content_type = response
@@ -367,6 +488,71 @@ pub async fn fetch_full_text(address: &str, source: &str) -> Result<String, Stri
         .await
         .map_err(|_| "无法解析全文。")?
 }
+
+fn article_image_referrer(article: &Url, image: &Url) -> Option<&'static str> {
+    (article.scheme() == "https"
+        && article.port_or_known_default() == Some(443)
+        && matches!(
+            article.host_str(),
+            Some("sspai.com" | "www.sspai.com" | "go-post.sspai.com")
+        )
+        && image.scheme() == "https"
+        && image.port_or_known_default() == Some(443)
+        && image.host_str() == Some("cdnfile.sspai.com"))
+    .then_some("https://sspai.com/")
+}
+
+pub async fn fetch_full_text_image(
+    article_url: &str,
+    html: &str,
+    address: &str,
+) -> Result<Vec<u8>, String> {
+    let article = safe_url(article_url)?;
+    let image = safe_url(address)?;
+    let referrer = article_image_referrer(&article, &image).ok_or("这张图片不支持补取。")?;
+    let in_article = {
+        let fragment = Html::parse_fragment(html);
+        let selector = Selector::parse("img[src], img[data-src]").unwrap();
+        let mut images = fragment.select(&selector);
+        images.any(|element| {
+            ["src", "data-src"].into_iter().any(|attribute| {
+                element
+                    .attr(attribute)
+                    .and_then(|value| article.join(value.trim()).ok())
+                    .and_then(|url| safe_url(url.as_str()).ok())
+                    .is_some_and(|url| url == image)
+            })
+        })
+    };
+    if !in_article {
+        return Err("这张图片不在缓存正文中。".into());
+    }
+    tokio::time::timeout(Duration::from_secs(15), async {
+        let client = pinned_reader_client(&image, false).await?;
+        let response = client
+            .get(image)
+            .header(reqwest::header::REFERER, referrer)
+            .send()
+            .await
+            .map_err(|_| "无法下载正文图片。")?;
+        let mime = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.split(';').next());
+        if !matches!(
+            mime,
+            Some("image/jpeg" | "image/png" | "image/gif" | "image/webp" | "image/avif")
+        ) {
+            return Err("地址没有返回受支持的图片。".into());
+        }
+        let (bytes, _) = read_response(response).await?;
+        Ok(bytes)
+    })
+    .await
+    .map_err(|_| "补取正文图片超时。")?
+}
+
 fn entry_body(entry: &feed_rs::model::Entry) -> &str {
     entry
         .content
@@ -480,25 +666,26 @@ fn append_attachments(
         let Ok(url) = safe_url(url.as_str()) else {
             continue;
         };
-        let Some(tag) = media_tag(&url, mime) else {
-            continue;
-        };
         if !seen.insert(url.clone()) {
             continue;
         }
-        let src = url
-            .as_str()
-            .replace('&', "&amp;")
-            .replace('"', "&quot;")
-            .replace('<', "&lt;")
-            .replace('>', "&gt;");
-        if tag == "img" {
-            let _ = write!(html, r#"<img src="{src}" alt="" loading="lazy">"#);
-        } else {
-            let _ = write!(
-                html,
-                r#"<{tag} src="{src}" controls preload="none"></{tag}>"#
-            );
+        let src = escape_markup(url.as_str());
+        match media_tag(&url, mime) {
+            Some("img") => {
+                let _ = write!(html, r#"<img src="{src}" alt="" loading="lazy">"#);
+            }
+            Some(tag) => {
+                let _ = write!(
+                    html,
+                    r#"<{tag} src="{src}" controls preload="none"></{tag}>"#
+                );
+            }
+            None => {
+                let _ = write!(
+                    html,
+                    r#"<p><a href="{src}" data-modu-attachment="">打开附件</a></p>"#
+                );
+            }
         }
     }
 }
@@ -538,6 +725,7 @@ pub fn parse(bytes: &[u8], url: &Url, name: &str, generation: i64) -> Result<Pre
         last_success: None,
         last_error: None,
     };
+    let atom = feed.feed_type == feed_rs::model::FeedType::Atom;
     let mut seen = std::collections::HashSet::new();
     let mut articles = vec![];
     for (index, mut entry) in feed.entries.into_iter().enumerate() {
@@ -565,7 +753,22 @@ pub fn parse(bytes: &[u8], url: &Url, name: &str, generation: i64) -> Result<Pre
             .as_ref()
             .and_then(|content| content.body.as_deref())
             .is_some_and(|content| !content.trim().is_empty());
-        let mut clean = sanitize_markup(entry_body(&entry), &base, false);
+        let plain_atom = atom
+            && (if has_inline_content {
+                entry.content.as_ref().map(|content| &content.content_type)
+            } else {
+                entry.summary.as_ref().map(|summary| &summary.content_type)
+            })
+            .is_some_and(|mime| mime.as_str() == "text/plain");
+        let body = entry_body(&entry);
+        let mut clean = if plain_atom {
+            format!(
+                "<div class=\"feed-plain-text\">{}</div>",
+                escape_markup(body)
+            )
+        } else {
+            sanitize_markup(body, &base, false)
+        };
         let inline = Html::parse_fragment(&clean);
         let excerpt = inline
             .root_element()
@@ -696,6 +899,54 @@ mod tests {
     }
 
     #[test]
+    fn full_text_keeps_short_articles_galleries_and_content_structure() {
+        let url = Url::parse("https://example.org/posts/one").unwrap();
+        for page in [
+            "<article><p>A short post.</p></article>",
+            "<article><figure><picture><source srcset='large.png 2x'><img alt='Cover'></picture><figcaption>Cover</figcaption></figure></article>",
+            "<main><table><tr><td>1</td></tr></table></main>",
+        ] {
+            assert!(extract_full_text(page.as_bytes(), &url, "text/html").is_ok());
+        }
+        let page = r##"<article><p><a href="#note">Note</a></p><p id="note">Footnote</p>
+            <pre><code class="language-js">let x = 1;</code></pre>
+            <math display="block"><mfrac><mi>x</mi><mn>2</mn></mfrac></math>
+            <video src="clip.mp4"><track src="captions.vtt" kind="captions" srclang="en"></video>
+            <iframe src="https://example.org/player"></iframe></article>"##;
+        let full = extract_full_text(page.as_bytes(), &url, "text/html").unwrap();
+        for kept in [
+            "href=\"#note\"",
+            "id=\"note\"",
+            "class=\"language-js\"",
+            "<mfrac>",
+            "https://example.org/posts/captions.vtt",
+            "https://example.org/player",
+        ] {
+            assert!(full.contains(kept), "{kept} missing in {full}");
+        }
+        assert!(!full.contains("<iframe"));
+    }
+
+    #[test]
+    fn atom_plain_text_and_document_attachments_are_preserved() {
+        let url = Url::parse("https://example.org/feed").unwrap();
+        let atom = br#"<feed xmlns="http://www.w3.org/2005/Atom"><title>Notes</title><entry>
+            <id>urn:notes:1</id><title>Example</title>
+            <content type="text">Vec&lt;T&gt;
+  &lt;div&gt; &amp; end</content>
+            <link rel="enclosure" href="report.pdf" type="application/pdf" />
+            </entry></feed>"#;
+        let parsed = parse(atom, &url, "", 0).unwrap();
+        let html = &parsed.articles[0].html;
+        assert!(
+            html.contains("Vec&lt;T&gt;\n  &lt;div&gt; &amp; end"),
+            "{html}"
+        );
+        assert!(html.contains("data-modu-attachment"));
+        assert!(html.contains("https://example.org/report.pdf"));
+    }
+
+    #[test]
     fn full_text_only_falls_back_for_virtual_dns_on_https_domains() {
         let page = Url::parse("https://sspai.com/post/119023").unwrap();
         let virtual_ip: SocketAddr = "198.18.0.35:443".parse().unwrap();
@@ -741,6 +992,38 @@ mod tests {
             ["[2606:4700:4700::1111]:8443".parse().unwrap()]
         );
         assert!(dns_addresses(br#"{"Status":3}"#, 1, 443).is_empty());
+    }
+
+    #[test]
+    fn full_text_image_referrer_is_scoped_to_sspai_cdn() {
+        let article = safe_url("https://sspai.com/post/118879").unwrap();
+        let image = safe_url("https://cdnfile.sspai.com/picture.jpg").unwrap();
+        assert_eq!(
+            article_image_referrer(&article, &image),
+            Some("https://sspai.com/")
+        );
+        for unlisted in [
+            "http://cdnfile.sspai.com/picture.jpg",
+            "https://cdnfile.sspai.com:8443/picture.jpg",
+            "https://cdnfile.sspai.com.example.org/picture.jpg",
+        ] {
+            assert_eq!(
+                article_image_referrer(&article, &safe_url(unlisted).unwrap()),
+                None
+            );
+        }
+        let other = safe_url("https://example.org/post").unwrap();
+        assert_eq!(article_image_referrer(&other, &image), None);
+    }
+
+    #[tokio::test]
+    async fn full_text_image_requires_an_image_in_the_cached_body() {
+        let image = "https://cdnfile.sspai.com/picture.jpg";
+        let link = format!("<a href='{image}'>download</a>");
+        let error = fetch_full_text_image("https://sspai.com/post/118879", &link, image)
+            .await
+            .unwrap_err();
+        assert!(error.contains("不在缓存正文中"));
     }
 
     #[test]

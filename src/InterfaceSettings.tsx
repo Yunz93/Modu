@@ -114,7 +114,7 @@ export function InterfaceSettings({ preferences, effectiveTheme, fonts, onChange
         <FontSizeField
           label={t("界面字号")}
           range={fontSizes}
-          value={preferences.uiFontSize ?? fontSizes.default}
+          value={preferences.uiFontSize ?? fontSizes.uiDefault}
           onChange={(uiFontSize) => onChange({ uiFontSize })}
         />
         <p className="setting-hint">

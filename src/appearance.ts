@@ -76,7 +76,7 @@ export function normalizePreferences(preferences: Preferences): Preferences {
     uiFontSize: Number.isInteger(uiFontSize) && isFontSizeInRange(uiFontSize, storedUiSizeRange)
       ? Math.min(uiFontSize, fontSizes.max) : undefined,
     fontSize: isFontSizeInRange(fontSize, storedReadingSizeRange)
-      ? Math.min(Math.round(fontSize), fontSizes.max) : fontSizes.default,
+      ? Math.min(Math.round(fontSize), fontSizes.max) : fontSizes.readingDefault,
     narrowReading: preferences.narrowReading === true,
     markReadOnOpen: preferences.markReadOnOpen !== false,
     codeFontFamily: isFontName(preferences.codeFontFamily)
@@ -164,7 +164,7 @@ export function appearanceVariables(
   theme = preferences.theme,
 ): Record<string, string> {
   const values = normalizePreferences(preferences);
-  const uiSize = values.uiFontSize ?? fontSizes.default;
+  const uiSize = values.uiFontSize ?? fontSizes.uiDefault;
   const accent = resolveAccent(values.accentColor, theme);
   const darkText = "#231e19";
   const lightText = "#fffaf4";
@@ -186,7 +186,8 @@ export function appearanceVariables(
       ? `color-mix(in srgb, ${accent} ${theme === "night" ? 16 : 12}%, ${themePalettes[theme].canvas})`
       : themePalettes[theme].selected,
     "--ui-font-size": `${uiSize}px`,
-    "--ui-size-offset": `${uiSize - fontSizes.default}px`,
+    // The component sizes in styles.css are drawn at a 16 px UI size.
+    "--ui-size-offset": `${uiSize - 16}px`,
     "--reading-size": `${values.fontSize}px`,
     "--reading-width": values.narrowReading ? "740px" : "1000px",
     "--code-font": fontFamilyCss(values.codeFontFamily, codeFontFallback),

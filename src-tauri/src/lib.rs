@@ -110,6 +110,7 @@ async fn load_article_full_text(
     state: tauri::State<'_, AppState>,
     id: String,
     expected_url: String,
+    refresh: Option<bool>,
 ) -> Result<String, String> {
     let (article, generation, feed_url) = with_db(&state, |db| {
         let article = db.article(&id)?;
@@ -119,7 +120,10 @@ async fn load_article_full_text(
     if article.url.as_deref() != Some(expected_url.as_str()) {
         return Err("文章已更新，请载入后再获取全文。".into());
     }
-    if let Some(html) = article.full_text_html {
+    if let Some(html) = article
+        .full_text_html
+        .filter(|_| !refresh.unwrap_or_default())
+    {
         return Ok(html);
     }
     let url = article.url.ok_or("这篇文章没有原文地址。")?;
@@ -129,6 +133,23 @@ async fn load_article_full_text(
     })?;
     Ok(html)
 }
+#[tauri::command]
+async fn load_full_text_image(
+    state: tauri::State<'_, AppState>,
+    id: String,
+    address: String,
+) -> Result<tauri::ipc::Response, String> {
+    let article = with_db(&state, |db| db.article(&id))?;
+    let url = article.url.as_deref().ok_or("这篇文章没有原文地址。")?;
+    let html = article
+        .full_text_html
+        .as_deref()
+        .ok_or("这篇文章没有缓存全文。")?;
+    feeds::fetch_full_text_image(url, html, &address)
+        .await
+        .map(tauri::ipc::Response::new)
+}
+
 #[tauri::command]
 fn import_library(
     state: tauri::State<AppState>,
@@ -302,6 +323,7 @@ pub fn run() {
             commit_feed,
             edit_source,
             load_article_full_text,
+            load_full_text_image,
             import_library,
             import_feed_file,
             frontend_ready,

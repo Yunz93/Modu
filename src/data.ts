@@ -106,7 +106,7 @@ export function createLibrary(): Library {
     saved: [],
     positions: {},
     preferences: {
-      fontSize: fontSizes.default,
+      fontSize: fontSizes.readingDefault,
       font: "sans",
       theme: "paper",
       accentColor: "",

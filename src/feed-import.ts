@@ -23,27 +23,67 @@ function mediaTag(url: string, mime: string) {
   if (/\.(m3u8|m4v|mov|mp4|ogv|webm)$/.test(path)) return "video";
 }
 
+function imageCandidates(raw: string | null, base?: string) {
+  const candidates: { url: string; descriptor: string }[] = [];
+  // Commas within a URL are valid. Only a trailing comma ends the URL token.
+  let remaining = raw ?? "";
+  if (remaining.length > 16_384) return candidates;
+  for (let count = 0; remaining && count < 64; count++) {
+    const match = /^[,\s]*([^\s]+)\s*/.exec(remaining);
+    if (!match) break;
+    const token = match[1];
+    remaining = remaining.slice(match[0].length);
+    const comma = remaining.indexOf(",");
+    const descriptor = token.endsWith(",") ? "" : (comma < 0 ? remaining : remaining.slice(0, comma)).trim();
+    if (!token.endsWith(",")) remaining = comma < 0 ? "" : remaining.slice(comma + 1);
+    const address = token.replace(/,+$/, "");
+    const url = address && httpUrl(address, base);
+    if (url && (!descriptor || /^(?:[1-9]\d*w|(?:\d+(?:\.\d+)?|\.\d+)x)$/.test(descriptor)))
+      candidates.push({ url, descriptor });
+  }
+  return candidates;
+}
+
 function articleMarkup(html: string, base?: string, attachments: Attachment[] = []) {
-  const fragment = DOMPurify.sanitize(html, {
-    RETURN_DOM_FRAGMENT: true,
-    USE_PROFILES: { html: true },
-    ADD_ATTR: ["data-src"],
-    ALLOW_DATA_ATTR: false,
-    FORBID_TAGS: ["style", "iframe", "form", "input", "button", "object", "embed", "track"],
-    FORBID_ATTR: ["style", "srcset", "autoplay", "ping"],
-  });
-  // Keep sanitized markup detached until the reader mounts the article.
-  const body = fragment.ownerDocument.createElement("div");
-  body.append(fragment);
   const resolve = (value: string | null) => {
     const input = value?.trim();
     return input ? httpUrl(input, base) : undefined;
   };
+  if (/<iframe\b/i.test(html)) {
+    const template = document.createElement("template");
+    template.innerHTML = html;
+    for (const frame of template.content.querySelectorAll("iframe")) {
+      const url = resolve(frame.getAttribute("src"));
+      if (!url) {
+        frame.remove();
+        continue;
+      }
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute("data-modu-embed", "");
+      link.textContent = "打开嵌入内容";
+      frame.replaceWith(link);
+    }
+    html = template.innerHTML;
+  }
+  const fragment = DOMPurify.sanitize(html, {
+    RETURN_DOM_FRAGMENT: true,
+    USE_PROFILES: { html: true, mathMl: true },
+    ADD_ATTR: ["data-src", "data-srcset", "data-modu-embed", "data-modu-attachment"],
+    ALLOW_DATA_ATTR: false,
+    FORBID_TAGS: ["style", "iframe", "form", "input", "button", "object", "embed", "annotation-xml"],
+    FORBID_ATTR: ["style", "autoplay", "ping"],
+  });
+  const body = fragment.ownerDocument.createElement("div");
+  body.append(fragment);
 
-  for (const anchor of body.querySelectorAll("a")) {
-    const url = resolve(anchor.getAttribute("href"));
-    if (url) {
-      anchor.href = url;
+  for (const anchor of body.querySelectorAll<HTMLAnchorElement>("a[href]")) {
+    const href = anchor.getAttribute("href")?.trim() ?? "";
+    const url = resolve(href);
+    if (href.startsWith("#")) {
+      anchor.removeAttribute("target");
+    } else if (url) {
+      anchor.href = new URL(href, base).href;
       anchor.target = "_blank";
       anchor.rel = "noopener noreferrer";
     } else anchor.removeAttribute("href");
@@ -51,22 +91,48 @@ function articleMarkup(html: string, base?: string, attachments: Attachment[] = 
 
   const seen = new Set(
     Array.from(body.querySelectorAll(`${mediaSourceSelector}, img[data-src]`), (media) =>
-      resolve(media.getAttribute("src")) ?? resolve(media.getAttribute("data-src")),
+      resolve(media.getAttribute("data-src")) ?? resolve(media.getAttribute("src")),
     ),
   );
   for (const attachment of attachments) {
     const url = resolve(attachment.url);
     if (!url || seen.has(url)) continue;
     const tag = mediaTag(url, attachment.mime);
-    if (!tag) continue;
-    const element = body.ownerDocument.createElement(tag);
-    element.setAttribute("src", url);
-    if (tag === "img") element.setAttribute("alt", "");
+    const element = body.ownerDocument.createElement(tag ?? "a");
+    if (!tag) {
+      element.setAttribute("href", url);
+      element.setAttribute("target", "_blank");
+      element.setAttribute("rel", "noopener noreferrer");
+      element.setAttribute("data-modu-attachment", "");
+      element.textContent = "打开附件";
+    } else {
+      element.setAttribute("src", url);
+      if (tag === "img") element.setAttribute("alt", "");
+    }
     body.append(element);
     seen.add(url);
   }
+  const setCandidates = (image: Element) => {
+    const candidates = imageCandidates(image.getAttribute("data-srcset"), base);
+    const list = candidates.length ? candidates : imageCandidates(image.getAttribute("srcset"), base);
+    image.removeAttribute("data-srcset");
+    if (list.length) image.setAttribute("srcset", list.map(({ url, descriptor }) => descriptor ? `${url} ${descriptor}` : url).join(", "));
+    else image.removeAttribute("srcset");
+    return list[0]?.url;
+  };
+  for (const source of body.querySelectorAll("source")) {
+    if (source.parentElement?.matches("picture") && setCandidates(source)) continue;
+    const url = resolve(source.getAttribute("src"));
+    if (url && source.parentElement?.matches("audio, video")) {
+      source.setAttribute("src", url);
+      source.removeAttribute("srcset");
+    } else source.remove();
+  }
   for (const image of body.querySelectorAll("img")) {
-    const url = resolve(image.getAttribute("src")) ?? resolve(image.getAttribute("data-src"));
+    const candidate = setCandidates(image);
+    const picture = image.parentElement?.matches("picture") ? image.parentElement : null;
+    const url = resolve(image.getAttribute("data-src")) ?? resolve(image.getAttribute("src"))
+      ?? candidate ?? imageCandidates(picture?.querySelector("source[srcset]")?.getAttribute("srcset") ?? null, base)[0]?.url;
     if (!url) {
       image.remove();
       continue;
@@ -77,11 +143,10 @@ function articleMarkup(html: string, base?: string, attachments: Attachment[] = 
     image.setAttribute("src", url);
     image.removeAttribute("data-src");
   }
-  for (const source of body.querySelectorAll("source")) {
-    const url = resolve(source.getAttribute("src"));
-    if (url && source.parentElement?.matches("audio, video")) {
-      source.setAttribute("src", url);
-    } else source.remove();
+  for (const track of body.querySelectorAll("track")) {
+    const url = resolve(track.getAttribute("src"));
+    if (url && track.parentElement?.matches("audio, video")) track.setAttribute("src", url);
+    else track.remove();
   }
   for (const media of body.querySelectorAll("audio, video")) {
     const url = resolve(media.getAttribute("src"));
@@ -94,6 +159,7 @@ function articleMarkup(html: string, base?: string, attachments: Attachment[] = 
     const poster = resolve(media.getAttribute("poster"));
     if (media.tagName === "VIDEO" && poster) media.setAttribute("poster", poster);
     else media.removeAttribute("poster");
+    if (media.hasAttribute("crossorigin")) media.setAttribute("crossorigin", "anonymous");
     media.setAttribute("controls", "");
     media.setAttribute("preload", "none");
     media.removeAttribute("loop");
@@ -108,21 +174,21 @@ export function cleanArticleHtml(html: string, base?: string): string {
 
 export function prepareFeedBody(html: string, base?: string, hasInlineContent?: boolean) {
   const body = articleMarkup(html, base);
-  const text = body.textContent?.trim() ?? "";
+  const content = body.textContent?.trim() ?? "";
   const original = base && httpUrl(base);
   const linksToMore = Array.from(body.querySelectorAll<HTMLAnchorElement>("a[href]")).some((link) => {
     const label = link.textContent?.trim() ?? "";
     return /^(?:查看全文|阅读全文|阅读更多|继续阅读|read more|read (?:the )?full article|continue reading)[\s。…»›→]*$/iu.test(label) &&
-      (text.endsWith(label) || link.href === original);
+      (content.endsWith(label) || httpUrl(link.href) === original);
   });
-  const truncated = /(?:…|\.{3})$/u.test(text);
-  // RSS descriptions and older saved articles can also contain a full body.
+  const truncated = /(?:…|\.{3})$/u.test(content);
+  // An explicit content field can contain a teaser. Require evidence of a body.
   const paragraphs = Array.from(body.querySelectorAll("p"))
     .filter((paragraph) => (paragraph.textContent?.trim().length ?? 0) >= 16);
-  const structured = paragraphs.length >= 4 && text.length >= 400;
-  const complete = !linksToMore && !truncated && (hasInlineContent
-    ? Boolean(text || body.querySelector(mediaSourceSelector))
-    : structured);
+  const structured = hasInlineContent
+    ? paragraphs.length >= 2 || Boolean(body.querySelector("pre code, table td, math"))
+    : paragraphs.length >= 4 && content.length >= 400;
+  const complete = !linksToMore && !truncated && structured;
   return { markup: { __html: body.innerHTML }, complete };
 }
 
@@ -146,13 +212,20 @@ export function cachedArticleText(article: Article): string {
   return value;
 }
 
-function feedMarkup(item: Element, name: string): string {
+function feedMarkup(item: Element, name: string, atom: boolean): string {
   const element = children(item, name).find((child) => child.namespaceURI !== mediaRssNamespace);
   if (element?.getAttribute("type") === "xhtml") {
     const serializer = new XMLSerializer();
     return Array.from(element.children, (child) => serializer.serializeToString(child)).join("");
   }
-  return element?.textContent?.trim() ?? "";
+  const content = element?.textContent?.trim() ?? "";
+  if (atom && element && [null, "text", "text/plain"].includes(element.getAttribute("type")) && content) {
+    const plain = document.createElement("div");
+    plain.className = "feed-plain-text";
+    plain.textContent = content;
+    return plain.outerHTML;
+  }
+  return content;
 }
 
 function feedAttachments(item: Element, atom: boolean, base?: string): Attachment[] {
@@ -226,8 +299,8 @@ export function parseFeedFile(xml: string): {
   const seenKeys = new Set<string>();
   const articles: Article[] = children(channel, atom ? "entry" : "item").flatMap(
     (item) => {
-      const inlineContent = feedMarkup(item, "encoded") || feedMarkup(item, "content");
-      const rawHtml = inlineContent || feedMarkup(item, "description") || feedMarkup(item, "summary");
+      const inlineContent = feedMarkup(item, "encoded", atom) || feedMarkup(item, "content", atom);
+      const rawHtml = inlineContent || feedMarkup(item, "description", atom) || feedMarkup(item, "summary", atom);
       const rawLink = atom
         ? children(item, "link")
             .find(

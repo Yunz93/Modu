@@ -482,13 +482,13 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
     }));
     notify(read ? t("已标为未读") : t("已标为已读"));
   };
-  const fetchFullText = async () => {
+  const fetchFullText = async (refresh = false) => {
     if (!desktop || !article?.url || fetchingFullText.has(article.id) || installLocked || restorePending.current) return;
     const { id, url } = article;
     const generation = restoredGeneration.current;
     setFetchingFullText((current) => new Set([...current, id]));
     try {
-      const html = await native.fullText(id, url);
+      const html = await native.fullText(id, url, refresh);
       if (generation !== restoredGeneration.current) return;
       setLibrary((current) => ({
         ...current,
@@ -526,8 +526,8 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
         event.preventDefault();
         const delta = event.key === "-" ? -fontSizes.step : fontSizes.step;
         setLibrary((current) => {
-          const { min, max, default: defaultSize } = fontSizes;
-          const size = current.preferences.uiFontSize ?? defaultSize;
+          const { min, max, uiDefault } = fontSizes;
+          const size = current.preferences.uiFontSize ?? uiDefault;
           const uiFontSize = Math.min(max, Math.max(min, size + delta));
           return size === uiFontSize ? current : {
             ...current,
@@ -1435,12 +1435,12 @@ function ReaderApp({ loaded }: { loaded: Loaded | null }) {
         source={source}
         saved={!!article && savedIds.has(article.id)}
         read={!!article && readIds.has(article.id)}
-        onFullText={desktop ? () => void fetchFullText() : undefined}
+        onFullText={desktop ? (refresh) => void fetchFullText(refresh) : undefined}
         fetchingFullText={!!article && fetchingFullText.has(article.id)}
         effectiveTheme={effectiveTheme}
         preferences={library.preferences}
         focus={focus}
-        position={article ? (positions.current[article.id] ?? 0) : 0}
+        getPosition={(key) => positions.current[key] ?? 0}
         onSave={toggleSave}
         onRead={toggleRead}
         onFocus={() => setFocus((value) => !value)}

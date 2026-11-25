@@ -1,5 +1,5 @@
 import { useTranslation } from "./locale-context";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as Popover from "@radix-ui/react-popover";
 import {
   ArrowLeftIcon,
@@ -9,11 +9,16 @@ import {
   BookmarkSimpleIcon,
   CheckIcon,
   CheckCircleIcon,
+  FileTextIcon,
+  NewspaperIcon,
   MoonIcon,
   SunIcon,
   TextAaIcon,
 } from "@phosphor-icons/react";
 import { cleanArticleHtml, prepareFeedBody } from "./feed-import";
+import { desktop, native } from "./desktop";
+import { presentArticle } from "./article-presentation";
+import { watchReaderMedia } from "./reader-media";
 import { ReadingSettings, useFontChoices } from "./TypographySettings";
 import type { Article, Preferences, Source } from "./model";
 
@@ -25,10 +30,10 @@ type Props = {
   focus: boolean;
   effectiveTheme: Preferences["theme"];
   preferences: Preferences;
-  position: number;
+  getPosition: (key: string) => number;
   onSave: () => void;
   onRead: () => void;
-  onFullText?: () => void;
+  onFullText?: (refresh?: boolean) => void;
   fetchingFullText: boolean;
   onFocus: () => void;
   onBack: () => void;
@@ -44,7 +49,7 @@ export function Reader({
   focus,
   effectiveTheme,
   preferences,
-  position,
+  getPosition,
   onSave,
   onRead,
   onFullText,
@@ -58,54 +63,138 @@ export function Reader({
   const night = effectiveTheme === "night";
   const themeLabel = t(night ? "切换到浅色主题" : "切换到深色主题");
   const [appearanceOpen, setAppearanceOpen] = useState(false);
-  const [fullTextArticleId, setFullTextArticleId] = useState<string>();
-  const showFullText = !!article?.fullTextHtml && fullTextArticleId === article.id;
+  const [openFullTextKey, setOpenFullTextKey] = useState<string>();
+  // Keep existing per-article positions compatible with older reading libraries.
+  const fullTextKey = article ? `\0full-text:${JSON.stringify([article.id, article.url])}` : undefined;
+  const showFullText = Boolean(article?.fullTextHtml && openFullTextKey === fullTextKey);
+  const positionKey = showFullText ? fullTextKey : article?.id;
   const fonts = useFontChoices(appearanceOpen);
   const appearancePanel = useRef<HTMLDivElement>(null);
   const scroll = useRef<HTMLDivElement>(null);
+  const articleBody = useRef<HTMLDivElement>(null);
   const restoring = useRef(false);
-  const initialPosition = useRef(position);
-  initialPosition.current = position;
+  const readPosition = useRef(getPosition);
+  readPosition.current = getPosition;
   const articleBase = article?.url ?? source?.url;
   const feedBody = useMemo(
     () => prepareFeedBody(article?.html ?? "", articleBase, article?.hasInlineContent),
     [article?.html, articleBase, article?.hasInlineContent],
   );
-  const markup = useMemo(
-    () => showFullText
-      ? { __html: cleanArticleHtml(article?.fullTextHtml ?? "", articleBase) }
-      : feedBody.markup,
-    [showFullText, article?.fullTextHtml, articleBase, feedBody.markup],
+  const fullTextBody = useMemo(
+    () => article?.fullTextHtml ? cleanArticleHtml(article.fullTextHtml, articleBase) : "",
+    [article?.fullTextHtml, articleBase],
   );
+  const activeHtml = showFullText ? fullTextBody : feedBody.markup.__html;
+  const markup = useMemo(() => ({
+    __html: presentArticle(activeHtml, articleBase, {
+      copy: t("复制代码"),
+      embed: t("打开嵌入内容"),
+      attachment: t("打开附件"),
+    }),
+  }), [activeHtml, articleBase, t]);
+  const [copyStatus, setCopyStatus] = useState("");
   useEffect(() => {
-    restoring.current = true;
-    const frame = requestAnimationFrame(() => {
-      if (scroll.current) scroll.current.scrollTop = showFullText ? 0 : initialPosition.current;
-      restoring.current = false;
+    const body = articleBody.current;
+    const id = article?.id;
+    if (!body) return;
+    return watchReaderMedia(body, {
+      retryImage: desktop && showFullText && id ? (url) => native.fullTextImage(id, url) : undefined,
+      imageFailed: t("图片加载失败"),
+      mediaFailed: t("媒体加载失败"),
+      captionsFailed: t("字幕加载失败"),
+      openMedia: t("打开原始媒体"),
     });
-    return () => cancelAnimationFrame(frame);
-  }, [article?.id, showFullText]);
+  }, [article?.id, markup, showFullText, t]);
+  useLayoutEffect(() => {
+    const viewport = scroll.current;
+    const body = articleBody.current;
+    if (!viewport || !body || !positionKey) return;
+    const target = readPosition.current(positionKey);
+    restoring.current = true;
+    viewport.scrollTop = target;
+    const frame = requestAnimationFrame(() => { restoring.current = false; });
+    // A cached article's images may establish their height after the first layout.
+    if (viewport.scrollTop >= target - 1) return () => cancelAnimationFrame(frame);
+    const observer = new ResizeObserver(() => {
+      if (viewport.scrollHeight - viewport.clientHeight + 1 < target) return;
+      viewport.scrollTop = target;
+      stopWaiting();
+    });
+    const intentEvents = ["wheel", "pointerdown", "touchstart", "keydown"] as const;
+    function stopWaiting() {
+      observer.disconnect();
+      clearTimeout(timeout);
+      intentEvents.forEach((event) => viewport?.removeEventListener(event, stopWaiting));
+    }
+    const timeout = setTimeout(stopWaiting, 5_000);
+    intentEvents.forEach((event) => viewport.addEventListener(event, stopWaiting, { passive: true }));
+    observer.observe(body);
+    return () => {
+      stopWaiting();
+      cancelAnimationFrame(frame);
+    };
+  }, [positionKey, articleBase]);
+
+  async function copyCode(button: HTMLButtonElement) {
+    const code = button.parentElement?.querySelector("pre")?.textContent;
+    if (!code) return;
+    try {
+      await navigator.clipboard.writeText(code);
+    } catch {
+      const field = document.createElement("textarea");
+      field.value = code;
+      field.className = "sr-only";
+      field.setAttribute("readonly", "");
+      const previous = document.activeElement;
+      document.body.append(field);
+      field.select();
+      let copied = false;
+      try { copied = document.execCommand("copy"); } catch { /* Use the failure message below. */ }
+      field.remove();
+      if (previous instanceof HTMLElement) previous.focus({ preventScroll: true });
+      if (!copied) {
+        setCopyStatus(t("复制失败"));
+        return;
+      }
+    }
+    if (button.isConnected) button.textContent = t("已复制");
+    setCopyStatus(t("代码已复制"));
+  }
 
   return (
     <section className="reader" aria-label={t("文章阅读区")} id="main-content">
       <div className="reader-toolbar">
-        <button
-          className="icon-button mobile-back"
-          aria-label={t("返回文章列表")}
-          onClick={onBack}
-        >
-          <ArrowLeftIcon size={22} />
-        </button>
-        {focus && (
+        <div className="reader-nav-actions">
           <button
-            className="icon-button exit-focus"
-            aria-label={t("退出专注")}
-            title={t("退出专注 · Esc")}
-            onClick={onFocus}
+            className="icon-button mobile-back"
+            aria-label={t("返回文章列表")}
+            onClick={onBack}
           >
-            <ArrowsInSimpleIcon size={22} aria-hidden="true" />
+            <ArrowLeftIcon size={22} />
           </button>
-        )}
+          {focus && (
+            <button
+              className="icon-button exit-focus"
+              aria-label={t("退出专注")}
+              title={t("退出专注 · Esc")}
+              onClick={onFocus}
+            >
+              <ArrowsInSimpleIcon size={22} aria-hidden="true" />
+            </button>
+          )}
+          {article?.fullTextHtml && (
+            <button
+              className="icon-button full-text-switch"
+              title={t(showFullText ? "返回订阅内容" : "查看已缓存全文")}
+              aria-label={t(showFullText ? "返回订阅内容" : "查看已缓存全文")}
+              onClick={() => setOpenFullTextKey(showFullText ? undefined : fullTextKey)}
+            >
+              {showFullText
+                ? <NewspaperIcon size={22} aria-hidden="true" />
+                : <FileTextIcon size={22} aria-hidden="true" />}
+            </button>
+          )}
+        </div>
         <div className="reader-actions">
           <button
             className="icon-button"
@@ -189,8 +278,8 @@ export function Reader({
         className="reader-scroll"
         ref={scroll}
         onScroll={() => {
-          if (article && scroll.current && !showFullText && !restoring.current)
-            onPosition(article.id, scroll.current.scrollTop);
+          if (positionKey && scroll.current && !restoring.current)
+            onPosition(positionKey, scroll.current.scrollTop);
         }}
       >
         {article ? (
@@ -221,25 +310,48 @@ export function Reader({
                     </time>
                   </>
                 )}
-                {article.url && (article.fullTextHtml || (onFullText && !feedBody.complete)) && (
-                  article.fullTextHtml
-                    ? <button
-                        className="full-text-action"
-                        onClick={() => setFullTextArticleId(showFullText ? undefined : article.id)}
-                      >{t(showFullText ? "返回订阅内容" : "查看已缓存全文")}</button>
-                    : <button
-                        className="full-text-action"
-                        disabled={fetchingFullText}
-                        onClick={onFullText}
-                      >{t(fetchingFullText ? "正在获取全文…" : "获取全文")}</button>
+                {article.url && !article.fullTextHtml && onFullText && !feedBody.complete && (
+                  <button
+                    className="full-text-action"
+                    disabled={fetchingFullText}
+                    onClick={() => {
+                      setOpenFullTextKey(fullTextKey);
+                      onFullText();
+                    }}
+                  >{t(fetchingFullText ? "正在获取全文…" : "获取全文")}</button>
+                )}
+                {showFullText && onFullText && (
+                  <button className="full-text-action" disabled={fetchingFullText} onClick={() => onFullText(true)}>
+                    {t(fetchingFullText ? "正在获取全文…" : "重新获取全文")}
+                  </button>
                 )}
               </div>
             </header>
             <div
-              key={article.id}
+              key={positionKey}
+              ref={articleBody}
+              onClick={(event) => {
+                if (!(event.target instanceof Element)) return;
+                const copy = event.target.closest<HTMLButtonElement>("button.reader-copy-code");
+                if (copy) {
+                  setCopyStatus("");
+                  void copyCode(copy);
+                  return;
+                }
+                const href = event.target.closest("a[href]")?.getAttribute("href");
+                if (!href?.startsWith("#modu-reader-anchor-")) return;
+                event.preventDefault();
+                const target = event.currentTarget.querySelector(href);
+                if (target instanceof HTMLElement) {
+                  target.tabIndex = -1;
+                  target.focus({ preventScroll: true });
+                  target.scrollIntoView({ block: "start" });
+                }
+              }}
               className="article-body"
               dangerouslySetInnerHTML={markup}
             />
+            <span className="sr-only" role="status">{copyStatus}</span>
             <footer className="article-footer">
               <span>{t("读到这里，留一点时间想一想。")}</span>
               <button className="quiet-button" onClick={onRead}>

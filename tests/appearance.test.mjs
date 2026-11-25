@@ -55,10 +55,11 @@ test("legacy appearance settings gain optional fields without resetting existing
   assert.deepEqual(normalizePreferences(result), result);
 });
 
-test("interface and reader start at 16 px with the same system font", () => {
+test("interface starts at 14 px and reading at 16 px with the same system font", () => {
   const values = createLibrary().preferences;
   const css = appearanceVariables(values);
-  assert.equal(css["--ui-font-size"], "16px");
+  assert.equal(css["--ui-font-size"], "14px");
+  assert.equal(css["--ui-size-offset"], "-2px");
   assert.equal(css["--reading-size"], "16px");
   assert.equal(css["--ui-font"], uiFontFallback);
   assert.equal(css["--reading-font"], uiFontFallback);
@@ -166,7 +167,7 @@ test("reading and interface settings retain their own values and reject invalid 
     uiFontSize: 200,
     codeFontFamily: "bad\nname",
   });
-  assert.equal(bad["--ui-size-offset"], "0px");
+  assert.equal(bad["--ui-font-size"], "14px");
   assert.match(bad["--code-font"], /^"SFMono-Regular",/);
 });
 

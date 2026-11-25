@@ -6,7 +6,7 @@ use std::sync::LazyLock;
 #[serde(rename_all = "camelCase")]
 struct FontSizes {
     min: i64,
-    default: i64,
+    reading_default: i64,
     legacy_reading_max: i64,
 }
 
@@ -76,7 +76,7 @@ impl Default for Library {
             read: vec![],
             saved: vec![],
             positions: HashMap::new(),
-            preferences: serde_json::json!({"fontSize":FONT_SIZES.default,"font":"sans","theme":"night","accentColor":"","uiFontFamily":"","readingFontFamily":""}),
+            preferences: serde_json::json!({"fontSize":FONT_SIZES.reading_default,"font":"sans","theme":"night","accentColor":"","uiFontFamily":"","readingFontFamily":""}),
             selected_id: None,
         }
     }
