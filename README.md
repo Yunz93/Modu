@@ -1,75 +1,35 @@
-# 墨牍 Modu
+# Modu · 墨牍
 
-面向 macOS 的本地 RSS 阅读器。集中订阅博客与技术资讯，留一点时间，读点好内容。
+[简体中文](README.zh-CN.md)
 
-## 功能
+Modu is a local-first RSS reader for macOS. Follow the blogs and tech publications you enjoy, then read them in one place.
 
-- RSS / Atom 订阅、网页订阅发现、手动和定时刷新与 SQLite 离线缓存。
-- 经典三栏、来源未读数、批量标已读与撤销、紧凑列表、跨订阅正文搜索和专注阅读。
-- 墨知金属灰与纸质白、自定义主题色、系统字体发现、界面和正文字体独立设置。
-- 阅读位置、已读、收藏与外观自动保存，退出后继续阅读。
-- 订阅重命名、分组和排序，支持带目录的 OPML 导入导出以及完整 JSON 备份。
-- 应用内更新：静默检查、跳过版本、进度、取消下载、签名验证与安装重启。安装前保存失败会停止更新。
-- 原拾读阅读库自动迁移，旧库保持原样。
-- 订阅读取可取消，刷新错误保留并可重试，取消订阅后可恢复缓存。
-- 保存失败可继续使用、重试或导出后退出；损坏阅读库支持保留原文件后从备份恢复。
-- 原生菜单、单实例与窗口位置/逻辑尺寸记忆。
+![Modu's three-pane reader in the light theme](docs/images/modu-light.jpg)
 
-桌面版新阅读库预置 5 个科技订阅，包含潮流周刊。点击「刷新订阅」获取文章。阅读字体默认使用系统字体，可在设置中单独调整。
+## Get Modu
 
-桌面版抓取订阅，也可按需提取文章全文并缓存。启动刷新和定时刷新均可在「阅读库」设置中开启。浏览器预览使用 localStorage 与文件导入。阅读器支持正文及订阅附件里的直链图片、音频和视频。图片随阅读加载，音视频可手动播放，第三方嵌入播放器可通过原文入口打开。
+**Requires an Apple Silicon Mac with macOS 12 or later.**
 
-## 下载
+Download the DMG from the [latest release](https://github.com/Yunz93/Modu/releases/latest) and drag `墨牍.app` into Applications. The app has not been notarized by Apple.
 
-从 [最新正式版](https://github.com/Yunz93/Modu/releases/latest) 下载 Apple Silicon DMG，将「墨牍.app」拖入 Applications。当前安装包使用 ad-hoc 签名，未做 Apple 公证。
-
-拾读 0.1.0 需要手动安装一次墨牍。首次启动墨牍前先退出拾读，墨牍会自动复制旧阅读库。之后可在阅读库菜单中检查更新。
-
-## macOS 一键安装
-
-在 Apple Silicon Mac 的终端运行以下命令。脚本从 GitHub Releases 下载最新正式版，校验安装包后安装到 `/Applications/墨牍.app` 并打开。使用中的墨牍或拾读请先用 ⌘Q 退出。
+To install from Terminal, quit any running copy of Modu with ⌘Q and run:
 
 ```sh
 (set -o pipefail; curl -fsSL https://raw.githubusercontent.com/Yunz93/Modu/main/scripts/install-macos.sh | /bin/bash)
 ```
 
-只需 macOS 自带工具。可设定安装目录、正式版本和是否安装后打开，例如：
+The script verifies the download and installs the app in Applications. Your reading library stays in place. To update from the app, open **Settings → About & updates**.
 
-```sh
-(set -o pipefail; curl -fsSL https://raw.githubusercontent.com/Yunz93/Modu/main/scripts/install-macos.sh | INSTALL_DIR="$HOME/Applications" RELEASE_TAG=v0.1.1 OPEN_APP=0 /bin/bash)
-```
+## Features
 
-脚本安装的是 GitHub 已发布的版本。它只替换应用包，阅读库继续使用原路径。
+- **Manage your subscriptions.** Add RSS or Atom feeds, discover feeds from a website URL, and import or export OPML with folders. Five technology feeds are ready to refresh in a new library, including Trend Weekly (潮流周刊).
+- **Find and finish articles.** Browse in three panes, search the current list or your whole library, bookmark articles, and pick up where you left off. Focus mode gives the article more room.
+- **Read technical content comfortably.** Fetch the full article on demand when a feed offers an excerpt. Read code with syntax highlighting and one-click copying, view formulas and images, and play supported audio and video.
+- **Set your own reading style.** Choose a light or dark theme and an accent color. Set interface and reading fonts independently. The interface is available in English and Simplified Chinese.
+- **Keep your library on your Mac.** Read cached articles offline and export a full backup, including subscriptions, bookmarks, and reading progress.
 
-## 开发
+![Modu displaying an article in the dark theme](docs/images/modu-dark.jpg)
 
-需要 Node.js 22.22+、Rust 1.90+ 和 macOS Command Line Tools。
+## License
 
-```sh
-npm ci
-npm run tauri:dev
-```
-
-浏览器预览：`npm run dev`。检查：
-
-```sh
-npm run typecheck
-npm test
-npm run test:native
-npm run build
-npm run test:sites
-```
-
-签名构建和发布资产准备见 [更新与发布](docs/UPDATER.md)。更新私钥不在仓库或客户端中。
-
-## 数据
-
-数据库位于 `~/Library/Application Support/com.yunz.modu/library.sqlite3`，恢复与更新前备份在同目录 `backups/`。新库尚不存在时，会从旧 `com.yunz.shidu` 目录复制一致的 SQLite 快照，包含已提交 WAL；原库不修改。`MODU_DATA_DIR` 可指定独立开发/验收目录。
-
-订阅文件导入上限 5 MB，完整备份读取上限 128 MB，网络订阅单次下载上限 8 MB。更新包与阅读库分离，覆盖应用不删除阅读数据。HTML 清理后显示，正文链接交给默认浏览器。
-
-## 设计与验证
-
-[产品实现](docs/product-plan.md) · [墨知实践采用记录](docs/mozi-practice-adoption.md) · [视觉规范](DESIGN.md) · [验收记录](VALIDATION.md)
-
-界面使用 React + TypeScript、Radix 和 Phosphor；原生服务使用 Tauri 2、Rust、SQLite、feed-rs 与标准签名更新器。本机截图、用户参考图和阅读库验收导出不随公开代码提交。原模板的 Sites 构建协议继续保留，未部署网页服务。
+Modu is released under the [Apache License 2.0](LICENSE). See the [third-party notices](THIRD_PARTY_NOTICES.md) and [release notes](CHANGELOG.md).

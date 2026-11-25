@@ -2,6 +2,7 @@
 name = "modu"
 version = "0.2.7"
 description = "墨牍 — 本地 RSS 阅读器"
+license = "Apache-2.0"
 edition = "2021"
 rust-version = "1.90"
 
